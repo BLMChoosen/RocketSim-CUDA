@@ -197,6 +197,18 @@ CarControls GetScenarioControl(const std::string& scenario, uint32_t tick, uint3
             c.boost = 1;
         }
         return c;
+    } else if (scenario == "car_side_wall" || scenario == "car_corner_ramp" || scenario == "car_floor_wall_transition") {
+        c.throttle = 1.0f;
+        c.boost = 1;
+        return c;
+    } else if (scenario == "car_jump_wall_land") {
+        c.throttle = 1.0f;
+        if (tick >= 10 && tick < 15) {
+            c.jump = 1;
+        }
+        return c;
+    } else if (scenario == "car_ceiling") {
+        return c;
     } else if (scenario == "boost_pad_pickup") {
         if (tick < 50) {
             c.throttle = 1.0f;
@@ -418,6 +430,91 @@ void ApplyScenarioInitialState(const std::string& scenario, CPURefSim& env, uint
         c.boost = 0.0f;
         env.SetCarState(0, c);
         
+        BallStatePOD b;
+        env.GetBallState(b);
+        b.pos = Vec3(0.0f, 0.0f, 93.15f);
+        b.vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.quat = Quat::identity();
+        env.SetBallState(b);
+    } else if (scenario == "car_side_wall") {
+        CarStatePOD c;
+        env.GetCarState(0, c);
+        c.pos = Vec3(3500.0f, 0.0f, 17.03f);
+        c.vel = Vec3(1000.0f, 0.0f, 0.0f);
+        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        c.quat = Quat::identity();
+        c.boost = 100.0f;
+        env.SetCarState(0, c);
+
+        BallStatePOD b;
+        env.GetBallState(b);
+        b.pos = Vec3(0.0f, 0.0f, 93.15f);
+        b.vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.quat = Quat::identity();
+        env.SetBallState(b);
+    } else if (scenario == "car_corner_ramp") {
+        CarStatePOD c;
+        env.GetCarState(0, c);
+        c.pos = Vec3(3000.0f, 4000.0f, 17.03f);
+        c.vel = Vec3(500.0f, 500.0f, 0.0f);
+        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        c.quat = Quat(0.9238795f, 0.0f, 0.0f, 0.3826834f);
+        c.boost = 100.0f;
+        env.SetCarState(0, c);
+
+        BallStatePOD b;
+        env.GetBallState(b);
+        b.pos = Vec3(0.0f, 0.0f, 93.15f);
+        b.vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.quat = Quat::identity();
+        env.SetBallState(b);
+    } else if (scenario == "car_ceiling") {
+        CarStatePOD c;
+        env.GetCarState(0, c);
+        c.pos = Vec3(0.0f, 0.0f, 1600.0f);
+        c.vel = Vec3(0.0f, 0.0f, 1200.0f);
+        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        c.quat = Quat::identity();
+        c.boost = 0.0f;
+        env.SetCarState(0, c);
+
+        BallStatePOD b;
+        env.GetBallState(b);
+        b.pos = Vec3(0.0f, 0.0f, 93.15f);
+        b.vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.quat = Quat::identity();
+        env.SetBallState(b);
+    } else if (scenario == "car_jump_wall_land") {
+        CarStatePOD c;
+        env.GetCarState(0, c);
+        c.pos = Vec3(3500.0f, 0.0f, 17.03f);
+        c.vel = Vec3(800.0f, 0.0f, 0.0f);
+        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        c.quat = Quat::identity();
+        c.boost = 50.0f;
+        env.SetCarState(0, c);
+
+        BallStatePOD b;
+        env.GetBallState(b);
+        b.pos = Vec3(0.0f, 0.0f, 93.15f);
+        b.vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        b.quat = Quat::identity();
+        env.SetBallState(b);
+    } else if (scenario == "car_floor_wall_transition") {
+        CarStatePOD c;
+        env.GetCarState(0, c);
+        c.pos = Vec3(3200.0f, 0.0f, 17.03f);
+        c.vel = Vec3(1200.0f, 0.0f, 0.0f);
+        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        c.quat = Quat::identity();
+        c.boost = 100.0f;
+        env.SetCarState(0, c);
+
         BallStatePOD b;
         env.GetBallState(b);
         b.pos = Vec3(0.0f, 0.0f, 93.15f);
@@ -1679,7 +1776,8 @@ int main(int argc, char** argv) {
     if (args.scenario == "all") {
         scenarios_to_run = {"idle", "freefall", "throttle", "boost", "jump_flip", "ablation_5_flips", "ball_flight", "car_ball_hit", "kickoff_goalie",
                             "boost_pad_pickup", "ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall",
-                            "ball_ceiling", "ball_corner_ramp", "ball_goal_post", "ball_crossbar"};
+                            "ball_ceiling", "ball_corner_ramp", "ball_goal_post", "ball_crossbar",
+                            "random", "kickoff_multicar", "car_side_wall", "car_corner_ramp", "car_ceiling", "car_jump_wall_land", "car_floor_wall_transition"};
     } else if (args.scenario == "ball_suite") {
         scenarios_to_run = {"ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall", "ball_ceiling", "ball_corner_ramp",
                             "ball_goal_post", "ball_crossbar", "ball_flight"};
