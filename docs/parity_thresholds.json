@@ -1169,6 +1169,166 @@
           "max_ball_vel": 0.000125
         }
       }
+    },
+    "car_car_front": {
+      "windows": {
+        "1": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "10": {
+          "max_car_pos": 0.0002,
+          "max_car_vel": 0.0008,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "60": {
+          "max_car_pos": 205.0,
+          "max_car_vel": 1450.0,
+          "max_car_quat": 0.3,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "120": {
+          "max_car_pos": 900.0,
+          "max_car_vel": 1800.0,
+          "max_car_quat": 0.8,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        }
+      }
+    },
+    "car_car_side": {
+      "windows": {
+        "1": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "10": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.004,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "60": {
+          "max_car_pos": 70.0,
+          "max_car_vel": 1400.0,
+          "max_car_quat": 0.3,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "120": {
+          "max_car_pos": 500.0,
+          "max_car_vel": 1400.0,
+          "max_car_quat": 0.8,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        }
+      }
+    },
+    "car_car_rear": {
+      "windows": {
+        "1": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "10": {
+          "max_car_pos": 0.00015,
+          "max_car_vel": 0.001,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "60": {
+          "max_car_pos": 45.0,
+          "max_car_vel": 1800.0,
+          "max_car_quat": 0.2,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "120": {
+          "max_car_pos": 300.0,
+          "max_car_vel": 1800.0,
+          "max_car_quat": 1.35,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        }
+      }
+    },
+    "car_car_air": {
+      "windows": {
+        "1": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "10": {
+          "max_car_pos": 0.00025,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "60": {
+          "max_car_pos": 110.0,
+          "max_car_vel": 1000.0,
+          "max_car_quat": 0.35,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "120": {
+          "max_car_pos": 400.0,
+          "max_car_vel": 1000.0,
+          "max_car_quat": 0.8,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        }
+      }
+    },
+    "car_on_car": {
+      "windows": {
+        "1": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.000125,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "10": {
+          "max_car_pos": 0.000125,
+          "max_car_vel": 0.004,
+          "max_car_quat": 0.000125,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "60": {
+          "max_car_pos": 35.0,
+          "max_car_vel": 550.0,
+          "max_car_quat": 0.05,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        },
+        "120": {
+          "max_car_pos": 200.0,
+          "max_car_vel": 800.0,
+          "max_car_quat": 0.5,
+          "max_ball_pos": 0.000125,
+          "max_ball_vel": 0.000125
+        }
+      }
     }
   }
 }

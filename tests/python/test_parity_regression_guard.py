@@ -274,7 +274,7 @@ def test_docs_parity_thresholds_schema_and_counts():
 
     assert "scenarios" in data, "Missing 'scenarios' root key"
     scenarios = data["scenarios"]
-    assert len(scenarios) == 35, f"Expected 35 scenarios, found {len(scenarios)}"
+    assert len(scenarios) == 40, f"Expected 40 scenarios, found {len(scenarios)}"
     assert data.get("tolerance_buffer_percent") == 25.0, "Expected buffer percent to be 25.0"
 
 
@@ -310,7 +310,7 @@ def test_cpp_parser_loads_actual_json():
 
     ok, cpp_thresh, err = cpp_load_parity_thresholds(content)
     assert ok, f"cpp_load_parity_thresholds failed: {err}"
-    assert len(cpp_thresh) == 35, f"C++ parser parsed {len(cpp_thresh)} scenarios, expected 35"
+    assert len(cpp_thresh) == 40, f"C++ parser parsed {len(cpp_thresh)} scenarios, expected 40"
 
     std_data = json.loads(content)["scenarios"]
     for scn, s_data in std_data.items():

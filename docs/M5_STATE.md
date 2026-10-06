@@ -1,13 +1,13 @@
 # Milestone 5 State Tracker — Phase 1 & Phase 2: Multi-Car Simulation
 
-> **Document Version:** 2.2.0  
-> **Last Updated:** 2026-10-05T20:15:00Z  
-> **Active Worker:** Worker 1 (Milestone 5 — Passo A: Base Compilável & Testes Confiáveis)  
+> **Document Version:** 2.3.0  
+> **Last Updated:** 2026-10-05T21:50:00Z  
+> **Active Worker:** Worker 1 (Milestone 5 — Feature 1: Colisão Carro-Carro)  
 > **Parent Orchestrator:** Orchestrator M5  
-> **Repository HEAD Hash:** `2f05285`  
-> **Working Tree Cleanliness:** Commit 2f05285 aplicado (correção de escopo car_fail); harness e .pyd recompilados; 64/64 pytests passando; differential_harness --check 100% OK  
+> **Repository HEAD Hash:** `ea449eb`  
+> **Working Tree Cleanliness:** F1 (Colisão Carro-Carro) implementada; SAT dBoxBox2 + solver bilateral + curvas de bump + cooldown; 30 cenários de differential_harness --scenario all --check passando; 64/64 pytests passando  
 > **Residual Printf Status:** Confirmed zero residual `printf` calls in CUDA kernels or differential harness  
-> **Session State:** Passo A concluído. Harness e módulo Python recompilados com sucesso. 64/64 testes pytest aprovados. Regressão guard --check aprovada com exit code 0. Ablação de flips reconfirmada em ~0.0068 UU (< 0.0078 UU) no tick 60. Próximo: Passo B (Módulo 2.2 - Colisão Carro-Carro).
+> **Session State:** F1 (Colisão Carro-Carro) concluída. All-pairs OBB dBoxBox2 GPU implementado fiel ao Bullet btBoxBoxDetector, curvas de bump de RLConst.h (ground/air e upward), cooldown de 0.25s e pós-impulso. 5 novos cenários (car_car_front, car_car_side, car_car_rear, car_car_air, car_on_car) 100% verificados. Próximo: F2 (Supersonic, Demolição & Respawn).
 
 ---
 
@@ -16,7 +16,7 @@
 | Module | Description | Status | Implementation Reference | Key Verification / Evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | **M5.2.1** | N Carros por Arena (até 6), Times & Kickoff Espelhado | **COMPLETED** | `car_state.cuh`, `sim_context.cu`, `cpu_ref_sim.cpp`, `harness_main.cpp` | `team` adicionado em `CarStatePOD` e `CarStateSoA`; `cpu_ref_sim` com times alternados e `ResetToRandomKickoff`; espelhamento do time laranja ($x \to -x, y \to -y, \text{yaw} + \pi$); `--cars <N>` e cenário `kickoff_multicar` no harness; 7/7 testes em `test_multi_car_kickoff.py`. |
-| **M5.2.2** | Colisão Carro-Carro (All-Pairs OBB, Bump Curves & Cooldown) | **IN PROGRESS** | `Arena.cpp:323-405`, `RLConst.h:505-527`, `step_kernel.cu` | Implementar detecção de contato entre pares de carros na mesma arena, resolver impulsos mútuos de bump via curvas de ground/air e upward, e cooldown de bump (0.25s). |
+| **M5.2.2** | Colisão Carro-Carro (All-Pairs OBB, Bump Curves & Cooldown) | **COMPLETED** | `contact_solver.cuh`, `step_kernel.cu`, `harness_main.cpp` | Detecção SAT OBB dBoxBox2 em `__device__`, clipping Sutherland-Hodgman, solver bilateral com $\mu = 0.09, e = 0.10$, curvas bump de `Arena.cpp:323-405` e `RLConst.h:505-527`, cooldown de 0.25s; 5 cenários validados no harness: `car_car_front`, `car_car_side`, `car_car_rear`, `car_car_air`, `car_on_car`. |
 | **M5.2.3** | Supersonic & Demolições | **PENDING** | `Car.cpp:468-490`, `RLConst.h:473-500` | Flags zero-copy `is_supersonic`, `is_demoed`, `demo_respawn_timer` (3.0s), desabilitação de colisão e forças enquanto demoed. |
 | **M5.2.4** | Flip Reset | **PENDING** | CPU Bullet / `Car.cpp` | Avaliar se oráculo possui flip reset em colisão carro-carro ou bola; implementar estritamente conforme CPU. |
 | **M5.2.5** | Fluxo de RL Multi-Carro | **PENDING** | `ArenaStateSoA`, `gym_env.py` | Dones, `goal_scored`, timeouts, `ball_touched` por carro, simetria azul/laranja. |

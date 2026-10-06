@@ -221,6 +221,14 @@ __device__ void StepCarDevice(
     // 16. Supersonic status update
     update_car_supersonic(car_idx, car_state, vel, dt);
 
+    // 16.5 Update car contact cooldown timer (Car.cpp:172-174)
+    if (car_state.car_contact_cooldown_timer) {
+        float cd = car_state.car_contact_cooldown_timer[car_idx];
+        if (cd > 0.0f) {
+            car_state.car_contact_cooldown_timer[car_idx] = fmaxf(cd - dt, 0.0f);
+        }
+    }
+
     // 17. Write back SoA
     car_state.pos_bt_x[car_idx] = pos_bt.x;
     car_state.pos_bt_y[car_idx] = pos_bt.y;
@@ -291,6 +299,16 @@ __global__ void StepSimulationKernel(
     // Increment Arena Tick Count
     if (arena_state.tick_count) {
         arena_state.tick_count[env_idx]++;
+    }
+
+    // Resolve Car-Car Collisions (all-pairs c1 < c2 per arena)
+    for (uint32_t c1 = 0; c1 < cars_per_env; ++c1) {
+        for (uint32_t c2 = c1 + 1; c2 < cars_per_env; ++c2) {
+            uint32_t car_idx1 = env_idx * cars_per_env + c1;
+            uint32_t car_idx2 = env_idx * cars_per_env + c2;
+            if (car_state.is_demoed && (car_state.is_demoed[car_idx1] || car_state.is_demoed[car_idx2])) continue;
+            resolve_car_car_collision(car_idx1, car_idx2, car_state, dt);
+        }
     }
 
     // Resolve Car-Ball Collisions
