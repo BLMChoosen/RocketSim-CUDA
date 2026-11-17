@@ -7,6 +7,7 @@
 #include "rocketsim_cuda/math/mat3.cuh"
 #include "rocketsim_cuda/types/car_state.cuh"
 #include "rocketsim_cuda/types/car_controls.cuh"
+#include "rocketsim_cuda/types/car_config.cuh"
 #include "rocketsim_cuda/physics/suspension.cuh"
 
 namespace rocketsim_cuda {
@@ -78,6 +79,12 @@ __device__ __forceinline__ float get_powerslide_steer_angle(float speed) {
     return 0.12610f;
 }
 
+__device__ __forceinline__ float get_steer_angle_threewheel(float speed) {
+    if (speed <= 0.0f) return 0.342473f;
+    if (speed >= 2300.0f) return 0.034837f;
+    return 0.342473f + (speed / 2300.0f) * (0.034837f - 0.342473f);
+}
+
 __device__ __forceinline__ float get_non_sticky_friction_scale(float normal_z) {
     if (normal_z <= 0.0f) return 0.1f;
     if (normal_z < 0.7075f) return 0.1f + (normal_z / 0.7075f) * (0.5f - 0.1f);
@@ -89,6 +96,12 @@ __device__ __forceinline__ float get_lat_friction(float slip) {
     if (slip <= 0.0f) return 1.0f;
     if (slip < 1.0f) return 1.0f - 0.8f * slip;
     return 0.2f;
+}
+
+__device__ __forceinline__ float get_lat_friction_threewheel(float slip) {
+    if (slip <= 0.0f) return 0.30f;
+    if (slip >= 1.0f) return 0.25f;
+    return 0.30f + slip * (0.25f - 0.30f);
 }
 
 __device__ __forceinline__ float get_handbrake_long_friction(float slip) {
@@ -153,7 +166,8 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
     const Vec3& vel,
     const Vec3& omega,
     float dt,
-    Vec3& total_force)
+    Vec3& total_force,
+    const CarConfig& car_cfg = CAR_CONFIG_OCTANE)
 {
     float fwd_speed = vel.dot(basis.forward);
     float abs_fwd_speed = fabsf(fwd_speed);
@@ -197,21 +211,26 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
         drive_speed_scale /= 4.0f;
     }
 
-    float drive_engine_force = engine_throttle * 1440.0f * drive_speed_scale; // 180 * 400 * 0.02 = 1440
-    float drive_brake_force = real_brake * 52.5f;                             // 180 * 14.58333 * 0.02 = 52.5
+    // CPU Reference Car.cpp:409-410:
+    // THROTTLE_TORQUE_AMOUNT = CAR_MASS_BT * 400.0f = 72000.0f
+    // driveEngineForce = engineThrottle * (THROTTLE_TORQUE_AMOUNT * UU_TO_BT) * driveSpeedScale = 72000.0f * 0.02f = 1440.0f
+    // BRAKE_TORQUE_AMOUNT = CAR_MASS_BT * (14.25f + 1/3f) = 2625.0f
+    // driveBrakeForce = realBrake * (BRAKE_TORQUE_AMOUNT * UU_TO_BT) = 2625.0f * 0.02f = 52.5f
+    float drive_engine_force = engine_throttle * 1440.0f * drive_speed_scale;
+    float drive_brake_force = real_brake * 52.5f;
 
     car_state.wheel_engine_force[car_idx] = drive_engine_force;
     car_state.wheel_brake[car_idx] = drive_brake_force;
 
-    // 3. Steer angle
-    float steer_angle = get_steer_angle(abs_fwd_speed);
+    // 3. Steer angle (Car.cpp:418)
+    float steer_angle = car_cfg.three_wheels ? get_steer_angle_threewheel(abs_fwd_speed) : get_steer_angle(abs_fwd_speed);
     if (handbrake_val > 0.0f) {
         steer_angle += (get_powerslide_steer_angle(abs_fwd_speed) - steer_angle) * handbrake_val;
     }
     steer_angle *= ctrl.steer;
     car_state.wheel_steer_angle[car_idx] = steer_angle;
 
-    // 4. Per-wheel friction coefficients
+    // 4. Per-wheel friction coefficients (Car.cpp:432-475)
     #pragma unroll
     for (int w = 0; w < 4; ++w) {
         if (!wheels_contact[w]) continue;
@@ -221,7 +240,7 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
         Vec3 lat_dir = basis.right * cosf(steer) - basis.forward * sinf(steer);
         Vec3 long_dir = lat_dir.cross(hit_normal);
 
-        Vec3 wheel_offset = get_octane_wheel_offset(w);
+        Vec3 wheel_offset = car_cfg.get_wheel_connection_offset(w);
         Vec3 wheel_delta = basis * wheel_offset;
         Vec3 cross_vec = omega.cross(wheel_delta) + vel;
 
@@ -231,7 +250,7 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
             friction_curve_input = base_friction / (fabsf(cross_vec.dot(long_dir)) + base_friction);
         }
 
-        float lat_fric = get_lat_friction(friction_curve_input);
+        float lat_fric = car_cfg.three_wheels ? get_lat_friction_threewheel(friction_curve_input) : get_lat_friction(friction_curve_input);
         float long_fric = 1.0f;
 
         if (handbrake_val > 0.0f) {
@@ -239,7 +258,8 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
             long_fric *= (get_handbrake_long_friction(friction_curve_input) - 1.0f) * handbrake_val + 1.0f;
         }
 
-        if (real_throttle == 0.0f) {
+        bool is_contact_sticky = (real_throttle != 0.0f) || (abs_fwd_speed > 25.0f);
+        if (!is_contact_sticky) {
             float non_sticky = get_non_sticky_friction_scale(hit_normal.z);
             lat_fric *= non_sticky;
             long_fric *= non_sticky;
@@ -266,7 +286,7 @@ __device__ __forceinline__ void update_car_wheel_dynamics(
         }
         Vec3 upwards_dir = (sum_normals.length_sq() > 1e-6f) ? sum_normals.normalized() : basis.up;
         bool full_stick = (real_throttle != 0.0f) || (abs_fwd_speed > 25.0f);
-        float sticky_scale = 0.5f + (full_stick ? (1.0f - fabsf(upwards_dir.z)) : 0.0f);
+        float sticky_scale = (car_cfg.three_wheels ? 0.0f : 0.5f) + (full_stick ? (1.0f - fabsf(upwards_dir.z)) : 0.0f);
         total_force = total_force + upwards_dir * (sticky_scale * GRAVITY_Z * CAR_MASS);
     }
 }
@@ -443,7 +463,8 @@ __device__ __forceinline__ void update_car_air_control(
     const CarControls& controls,
     const Mat3& basis,
     float dt,
-    Vec3& omega,
+    const Vec3& omega,
+    Vec3& total_torque_omega,
     Vec3& total_force,
     bool allow_air_torque = true)
 {
@@ -490,7 +511,7 @@ __device__ __forceinline__ void update_car_air_control(
                 rel_dodge_torque.y * FLIP_TORQUE_Y,
                 0.0f
             );
-            omega = omega + basis * dodge_torque * dt;
+            total_torque_omega = total_torque_omega + (basis * dodge_torque);
         } else {
             do_air_control = true;
         }
@@ -518,8 +539,8 @@ __device__ __forceinline__ void update_car_air_control(
         float damp_roll = dir_roll.dot(omega_pre) * CAR_AIR_CONTROL_DAMPING_Z;
 
         Vec3 air_damping = dir_yaw * damp_yaw + dir_pitch * damp_pitch + dir_roll * damp_roll;
-        Vec3 delta_omega = (air_torque - air_damping) * (CAR_TORQUE_SCALE * dt);
-        omega = omega + delta_omega;
+        Vec3 delta_omega_accel = (air_torque - air_damping) * CAR_TORQUE_SCALE;
+        total_torque_omega = total_torque_omega + delta_omega_accel;
     }
 }
 
@@ -591,7 +612,7 @@ __device__ __forceinline__ void update_car_auto_roll(
     const Mat3& basis,
     float dt,
     Vec3& total_force,
-    Vec3& omega)
+    Vec3& total_torque_omega)
 {
     Vec3 ground_up_dir;
     if (num_wheels_in_contact > 0) {
@@ -633,7 +654,7 @@ __device__ __forceinline__ void update_car_auto_roll(
     Vec3 torque_forward = torque_dir_forward * forward_torque_factor;
 
     total_force = total_force + ground_down_dir * (CAR_AUTOROLL_FORCE * CAR_MASS);
-    omega = omega + (torque_forward + torque_right) * (CAR_AUTOROLL_TORQUE * dt);
+    total_torque_omega = total_torque_omega + (torque_forward + torque_right) * CAR_AUTOROLL_TORQUE;
 }
 
 /**
@@ -645,6 +666,12 @@ __device__ __forceinline__ void update_car_supersonic(
     const Vec3& vel,
     float dt)
 {
+    if (car_state.is_demoed && car_state.is_demoed[car_idx]) {
+        if (car_state.is_supersonic) car_state.is_supersonic[car_idx] = 0;
+        if (car_state.supersonic_time) car_state.supersonic_time[car_idx] = 0.0f;
+        return;
+    }
+
     float speed_sq = vel.length_sq();
     bool is_super = (car_state.is_supersonic[car_idx] != 0);
     float super_time = car_state.supersonic_time[car_idx];
@@ -663,6 +690,132 @@ __device__ __forceinline__ void update_car_supersonic(
 
     car_state.is_supersonic[car_idx] = is_super ? 1 : 0;
     car_state.supersonic_time[car_idx] = super_time;
+}
+
+// ============================================================================
+// Canonical Car Respawn Dynamics (src/Sim/Car/Car.cpp:43-69, RLConst.h:393-398)
+// ============================================================================
+
+struct RespawnLocationDef {
+    float x;
+    float y;
+    float z;
+    float yaw;
+};
+
+// 4 Canonical Soccar Respawn Locations (RLConst.h:393-398)
+#if defined(__CUDA_ARCH__)
+__device__ static constexpr RespawnLocationDef SOCCAR_RESPAWN_LOCATIONS[4] = {
+#else
+static constexpr RespawnLocationDef SOCCAR_RESPAWN_LOCATIONS[4] = {
+#endif
+    { -2304.0f, -4608.0f, 36.0f, 1.57079632679f }, // Yaw = pi/2 (90 deg, facing +Y)
+    { -2688.0f, -4608.0f, 36.0f, 1.57079632679f },
+    {  2304.0f, -4608.0f, 36.0f, 1.57079632679f },
+    {  2688.0f, -4608.0f, 36.0f, 1.57079632679f }
+};
+
+/**
+ * @brief Respawns a car after its demo respawn timer expires.
+ * Mirrors Car::Respawn (src/Sim/Car/Car.cpp:43-69) and Arena kickoff mirroring (src/Sim/Arena/Arena.cpp:187-190).
+ */
+__device__ inline void respawn_car_device(
+    uint32_t car_idx,
+    uint32_t car_in_env_idx,
+    uint32_t cars_per_env,
+    uint32_t env_idx,
+    CarStateSoA& car_state,
+    float spawn_boost = BOOST_SPAWN)
+{
+    uint8_t team = car_state.team ? car_state.team[car_idx] : (car_in_env_idx % 2);
+    uint32_t team_car_idx = (cars_per_env > 1) ? (car_in_env_idx / 2) : car_in_env_idx;
+    uint32_t spawn_slot = (env_idx + team_car_idx) % 4;
+
+    const RespawnLocationDef& loc = SOCCAR_RESPAWN_LOCATIONS[spawn_slot];
+
+    float x = loc.x;
+    float y = loc.y;
+    float z = loc.z;
+    Quat q = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Yaw = pi/2
+
+    if (team != 0) { // Orange team: mirror X -> -X, Y -> -Y, yaw -> yaw + pi (Arena.cpp:187-190)
+        x = -loc.x;
+        y = -loc.y;
+        q = Quat(0.7071068f, 0.0f, 0.0f, -0.7071068f); // Yaw = -pi/2
+    }
+
+    // Set position and orientation
+    car_state.pos_x[car_idx] = x;
+    car_state.pos_y[car_idx] = y;
+    car_state.pos_z[car_idx] = z;
+
+    car_state.pos_bt_x[car_idx] = x * 0.02f;
+    car_state.pos_bt_y[car_idx] = y * 0.02f;
+    car_state.pos_bt_z[car_idx] = z * 0.02f;
+
+    car_state.q_w[car_idx] = q.w;
+    car_state.q_x[car_idx] = q.x;
+    car_state.q_y[car_idx] = q.y;
+    car_state.q_z[car_idx] = q.z;
+
+    // Reset velocities to zero
+    car_state.vel_x[car_idx] = 0.0f;
+    car_state.vel_y[car_idx] = 0.0f;
+    car_state.vel_z[car_idx] = 0.0f;
+
+    car_state.vel_bt_x[car_idx] = 0.0f;
+    car_state.vel_bt_y[car_idx] = 0.0f;
+    car_state.vel_bt_z[car_idx] = 0.0f;
+
+    car_state.ang_vel_x[car_idx] = 0.0f;
+    car_state.ang_vel_y[car_idx] = 0.0f;
+    car_state.ang_vel_z[car_idx] = 0.0f;
+
+    // Reset demo flags
+    if (car_state.is_demoed) car_state.is_demoed[car_idx] = 0;
+    if (car_state.demo_respawn_timer) car_state.demo_respawn_timer[car_idx] = 0.0f;
+
+    // Reset supersonic flags
+    if (car_state.is_supersonic) car_state.is_supersonic[car_idx] = 0;
+    if (car_state.supersonic_time) car_state.supersonic_time[car_idx] = 0.0f;
+
+    // Set spawn boost
+    car_state.boost[car_idx] = spawn_boost;
+    car_state.boosting_time[car_idx] = 0.0f;
+    car_state.time_since_boosted[car_idx] = 0.0f;
+    car_state.is_boosting[car_idx] = 0;
+
+    // Reset support & dynamics flags
+    car_state.is_on_ground[car_idx] = 1;
+    car_state.has_jumped[car_idx] = 0;
+    car_state.is_jumping[car_idx] = 0;
+    car_state.jump_time[car_idx] = 0.0f;
+    car_state.has_double_jumped[car_idx] = 0;
+    car_state.has_flipped[car_idx] = 0;
+    car_state.is_flipping[car_idx] = 0;
+    car_state.flip_time[car_idx] = 0.0f;
+    car_state.air_time[car_idx] = 0.0f;
+    car_state.air_time_since_jump[car_idx] = 0.0f;
+
+    car_state.is_auto_flipping[car_idx] = 0;
+    car_state.auto_flip_timer[car_idx] = 0.0f;
+    car_state.auto_flip_torque_scale[car_idx] = 0.0f;
+    car_state.handbrake_val[car_idx] = 0.0f;
+
+    car_state.wheel_contact_0[car_idx] = 1;
+    car_state.wheel_contact_1[car_idx] = 1;
+    car_state.wheel_contact_2[car_idx] = 1;
+    car_state.wheel_contact_3[car_idx] = 1;
+
+    car_state.suspension_length_0[car_idx] = 0.0f;
+    car_state.suspension_length_1[car_idx] = 0.0f;
+    car_state.suspension_length_2[car_idx] = 0.0f;
+    car_state.suspension_length_3[car_idx] = 0.0f;
+
+    if (car_state.ball_touched) car_state.ball_touched[car_idx] = 0;
+    if (car_state.ball_hit_is_valid) car_state.ball_hit_is_valid[car_idx] = 0;
+    if (car_state.car_contact_cooldown_timer) car_state.car_contact_cooldown_timer[car_idx] = 0.0f;
+    if (car_state.car_contact_other_car_id) car_state.car_contact_other_car_id[car_idx] = -1;
 }
 
 } // namespace rocketsim_cuda

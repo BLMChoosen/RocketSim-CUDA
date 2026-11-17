@@ -61,7 +61,8 @@ struct RsGoldCarRecord {
     uint8_t is_demoed = 0;
     uint8_t team = 0;
     uint8_t wheels_with_contact[4] = {0, 0, 0, 0};
-    uint8_t padding[2] = {0, 0};
+    uint8_t hitbox_type = 0;
+    uint8_t padding = 0;
     float suspension_lengths[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
@@ -73,13 +74,12 @@ public:
     explicit DeterministicInputGenerator(uint64_t seed = 42, uint64_t seq = 1);
     void Seed(uint64_t seed, uint64_t seq = 1);
     CarControls Generate();
+    uint32_t NextU32();
+    float NextFloatSigned();
 
 private:
     uint64_t m_state = 0;
     uint64_t m_inc = 1;
-
-    uint32_t NextU32();
-    float NextFloatSigned();
 };
 
 // Differential tolerances matching GEMINI.md Section 3.1

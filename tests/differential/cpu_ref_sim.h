@@ -18,7 +18,7 @@ namespace rocketsim_cuda {
 
 class CPURefSim {
 public:
-    explicit CPURefSim(int numCars = 1, bool addFloor = true, float tickRate = 120.0f, int spawnSeed = 0);
+    explicit CPURefSim(int numCars = 1, bool addFloor = true, float tickRate = 120.0f, int spawnSeed = 0, int hitboxType = 0);
     ~CPURefSim();
 
     // Disable copy
@@ -38,7 +38,13 @@ public:
     void ResetToRandomKickoff(int seed = -1);
 
     int GetNumCars() const { return m_numCars; }
+    int GetHitboxType() const { return m_hitboxType; }
+    void SetHitboxType(int ht);
+    RocketSim::Arena* GetArena() { return m_arena; }
+    const RocketSim::Arena* GetArena() const { return m_arena; }
     uint64_t GetTickCount() const;
+    void GetWheelDebug(int carIdx, int w, float& susp_force, float& v_rel, float& pushback, float& comp_bt) const;
+    void DumpCarInternalState(int carIdx) const;
 
 private:
     void InitArena();
@@ -50,6 +56,7 @@ private:
     bool m_addFloor = true;
     float m_tickRate = 120.0f;
     int m_spawnSeed = 0;
+    int m_hitboxType = 0;
 };
 
 } // namespace rocketsim_cuda

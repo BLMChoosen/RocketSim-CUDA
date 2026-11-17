@@ -52,8 +52,8 @@ bool GetCPURefSimBoostPadState(const CPURefSim* sim, int padIdx, bool& isActive,
     return false;
 }
 
-CPURefSim::CPURefSim(int numCars, bool addFloor, float tickRate, int spawnSeed)
-    : m_numCars(numCars), m_addFloor(addFloor), m_tickRate(tickRate), m_spawnSeed(spawnSeed) {
+CPURefSim::CPURefSim(int numCars, bool addFloor, float tickRate, int spawnSeed, int hitboxType)
+    : m_numCars(numCars), m_addFloor(addFloor), m_tickRate(tickRate), m_spawnSeed(spawnSeed), m_hitboxType(hitboxType) {
     EnsureRocketSimInit();
     InitArena();
 }
@@ -68,7 +68,8 @@ CPURefSim::CPURefSim(CPURefSim&& other) noexcept
       m_numCars(other.m_numCars),
       m_addFloor(other.m_addFloor),
       m_tickRate(other.m_tickRate),
-      m_spawnSeed(other.m_spawnSeed) {
+      m_spawnSeed(other.m_spawnSeed),
+      m_hitboxType(other.m_hitboxType) {
     {
         std::lock_guard<std::mutex> lock(s_simArenaMapMutex);
         s_simArenaMap.erase(&other);
@@ -87,6 +88,7 @@ CPURefSim& CPURefSim::operator=(CPURefSim&& other) noexcept {
         m_addFloor = other.m_addFloor;
         m_tickRate = other.m_tickRate;
         m_spawnSeed = other.m_spawnSeed;
+        m_hitboxType = other.m_hitboxType;
         {
             std::lock_guard<std::mutex> lock(s_simArenaMapMutex);
             s_simArenaMap.erase(&other);
@@ -165,9 +167,20 @@ void CPURefSim::InitArena() {
     }
 
     m_cars.clear();
+    const RocketSim::CarConfig* carCfg = &RocketSim::CAR_CONFIG_OCTANE;
+    switch (m_hitboxType) {
+        case 1: carCfg = &RocketSim::CAR_CONFIG_DOMINUS; break;
+        case 2: carCfg = &RocketSim::CAR_CONFIG_PLANK; break;
+        case 3: carCfg = &RocketSim::CAR_CONFIG_BREAKOUT; break;
+        case 4: carCfg = &RocketSim::CAR_CONFIG_HYBRID; break;
+        case 5: carCfg = &RocketSim::CAR_CONFIG_MERC; break;
+        case 6: carCfg = &RocketSim::CAR_CONFIG_PSYCLOPS; break;
+        default: carCfg = &RocketSim::CAR_CONFIG_OCTANE; break;
+    }
+
     for (int i = 0; i < m_numCars; i++) {
         RocketSim::Team team = (m_numCars > 1 && (i % 2 != 0)) ? RocketSim::Team::ORANGE : RocketSim::Team::BLUE;
-        RocketSim::Car* car = m_arena->AddCar(team, RocketSim::CAR_CONFIG_OCTANE);
+        RocketSim::Car* car = m_arena->AddCar(team, *carCfg);
         if (!car) {
             throw std::runtime_error("Failed to add car to RocketSim CPU Arena");
         }
@@ -190,6 +203,13 @@ void CPURefSim::CleanupArena() {
 }
 
 void CPURefSim::Reset() {
+    CleanupArena();
+    InitArena();
+}
+
+void CPURefSim::SetHitboxType(int ht) {
+    if (m_hitboxType == ht) return;
+    m_hitboxType = ht;
     CleanupArena();
     InitArena();
 }
@@ -255,7 +275,11 @@ void CPURefSim::GetCarState(int carIdx, CarStatePOD& out) const {
     out.has_double_jumped = cs.hasDoubleJumped ? 1 : 0;
     out.has_flipped = cs.hasFlipped ? 1 : 0;
     out.is_demoed = cs.isDemoed ? 1 : 0;
+    out.is_supersonic = cs.isSupersonic ? 1 : 0;
+    out.demo_respawn_timer = cs.demoRespawnTimer;
+    out.ball_touched = (cs.ballHitInfo.isValid && m_arena && cs.ballHitInfo.tickCountWhenHit == m_arena->tickCount) ? 1 : 0;
     out.team = (car->team == RocketSim::Team::BLUE) ? 0 : 1;
+    out.hitbox_type = static_cast<uint8_t>(m_hitboxType);
 
     for (int w = 0; w < 4; w++) {
         out.wheels_with_contact[w] = cs.wheelsWithContact[w] ? 1 : 0;
@@ -272,6 +296,17 @@ void CPURefSim::GetCarState(int carIdx, CarStatePOD& out) const {
     out.last_controls.boost     = cs.lastControls.boost ? 1 : 0;
     out.last_controls.jump      = cs.lastControls.jump ? 1 : 0;
     out.last_controls.handbrake = cs.lastControls.handbrake ? 1 : 0;
+}
+
+void CPURefSim::GetWheelDebug(int carIdx, int w, float& susp_force, float& v_rel, float& pushback, float& comp_bt) const {
+    susp_force = 0.0f; v_rel = 0.0f; pushback = 0.0f; comp_bt = 0.0f;
+    if (carIdx < 0 || carIdx >= static_cast<int>(m_cars.size())) return;
+    RocketSim::Car* car = m_cars[carIdx];
+    const auto& wi = car->_bulletVehicle.m_wheelInfo[w];
+    susp_force = wi.m_wheelsSuspensionForce;
+    v_rel = wi.m_suspensionRelativeVelocity;
+    pushback = wi.m_extraPushback;
+    comp_bt = wi.getSuspensionRestLength() - wi.m_raycastInfo.m_suspensionLength;
 }
 
 void CPURefSim::SetBallState(const BallStatePOD& in) {
@@ -306,11 +341,42 @@ void CPURefSim::SetCarState(int carIdx, const CarStatePOD& in) {
     cs.rotMat = RocketSim::RotMat(basis);
     cs.boost = in.boost;
     cs.isOnGround = (in.is_on_ground != 0);
+    cs.hasJumped = (in.has_jumped != 0);
+    cs.hasDoubleJumped = (in.has_double_jumped != 0);
+    cs.hasFlipped = (in.has_flipped != 0);
+    cs.isDemoed = (in.is_demoed != 0);
+    cs.isSupersonic = (in.is_supersonic != 0);
+    cs.demoRespawnTimer = in.demo_respawn_timer;
+    if (in.ball_touched && m_arena) {
+        cs.ballHitInfo.isValid = true;
+        cs.ballHitInfo.tickCountWhenHit = m_arena->tickCount;
+    }
     car->team = (in.team == 0) ? RocketSim::Team::BLUE : RocketSim::Team::ORANGE;
 
     car->SetState(cs);
     car->_rigidBody.activate(true);
     car->_rigidBody.setActivationState(ACTIVE_TAG);
+}
+
+void CPURefSim::DumpCarInternalState(int carIdx) const {
+    if (carIdx < 0 || carIdx >= static_cast<int>(m_cars.size())) return;
+    RocketSim::Car* car = m_cars[carIdx];
+    auto is = car->_internalState;
+    std::cout << "  [CPU Car " << carIdx << " Internal] "
+              << "og=" << (int)is.isOnGround
+              << " hasJmp=" << (int)is.hasJumped
+              << " isJmp=" << (int)is.isJumping
+              << " jmpTime=" << is.jumpTime
+              << " hasDblJmp=" << (int)is.hasDoubleJumped
+              << " hasFlip=" << (int)is.hasFlipped
+              << " isFlip=" << (int)is.isFlipping
+              << " flipTime=" << is.flipTime
+              << " isAutoFlip=" << (int)is.isAutoFlipping
+              << " wheelsContact=(" << (int)is.wheelsWithContact[0] << "," << (int)is.wheelsWithContact[1]
+              << "," << (int)is.wheelsWithContact[2] << "," << (int)is.wheelsWithContact[3] << ")"
+              << " worldContact=" << (int)is.worldContact.hasContact
+              << " lastJmp=" << (int)is.lastControls.jump
+              << "\n";
 }
 
 } // namespace rocketsim_cuda
