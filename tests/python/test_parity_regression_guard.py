@@ -272,7 +272,7 @@ def test_docs_parity_thresholds_schema_and_counts():
 
 
 def test_docs_parity_thresholds_positive_floating_bounds():
-    """Check that all 29 scenario entries have valid, strictly positive floating-point bounds."""
+    """Check that all 54 scenario entries have valid, strictly positive floating-point bounds."""
     path = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "parity_thresholds.json")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)

@@ -438,7 +438,7 @@ bool RunScenarioDifferential(
     for (uint32_t t = 0; t < args.ticks; t++) {
         for (uint32_t e = 0; e < args.envs; e++) {
             for (uint32_t c = 0; c < cars_per_env; c++) {
-                step_controls[e * cars_per_env + c] = GetScenarioControl(scenario_name, t, e + c * 100, lockstep_gen);
+                step_controls[e * cars_per_env + c] = GetScenarioControl(scenario_name, t, e, c, lockstep_gen);
             }
         }
 
@@ -517,8 +517,8 @@ bool RunScenarioDifferential(
             if (t < 10000) report.w10000.Update(d_c_pos, d_c_vel, d_c_quat, d_b_pos, d_b_vel, d_susp, d_boost, step_ok);
 
             if (snap_idx >= 0) {
-                const auto& c_cpu = cpu_cars[e];
-                const auto& c_gpu = gpu_cars[e];
+                const auto& c_cpu = cpu_cars[e * cars_per_env];
+                const auto& c_gpu = gpu_cars[e * cars_per_env];
                 const auto& b_cpu = cpu_balls[e];
                 const auto& b_gpu = gpu_balls[e];
 

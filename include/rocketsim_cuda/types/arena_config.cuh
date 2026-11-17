@@ -89,7 +89,7 @@ struct alignas(16) MutatorConfig {
     float goal_base_threshold_y      = SOCCAR_GOAL_SCORE_BASE_THRESHOLD_Y; // 5124.25f
 
     // Default Constructor: Standard Soccar
-    __host__ __device__ constexpr MutatorConfig() = default;
+    constexpr MutatorConfig() = default;
 
     // GameMode Constructor mirroring src/Sim/MutatorConfig/MutatorConfig.cpp:5-41
     __host__ __device__ constexpr explicit MutatorConfig(GameMode game_mode) {

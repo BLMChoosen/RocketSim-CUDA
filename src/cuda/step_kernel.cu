@@ -246,7 +246,6 @@ __device__ void StepCarDevice(
     car_state.world_contact_has_contact[car_idx] = 0;
 
     // 10. Multi-body suspension & bilateral tire friction impulses (btVehicleRL::updateVehicleSecond) (R3)
-    float pre_susp_vz = vel.z;
     Vec3 vel_bt = vel * 0.02f;
     apply_suspension_and_friction_multibody(
         pos, basis, car_cfg, wheel_results, dt,
@@ -259,7 +258,6 @@ __device__ void StepCarDevice(
         mut_cfg.car_mass
     );
     vel = vel_bt * 50.0f;
-    float post_susp_vz = vel.z;
 
     // 11. Boost update matching Car.cpp:143
     update_car_boost(car_idx, car_state, ctrl, is_on_ground, basis, dt, total_force);
@@ -271,7 +269,6 @@ __device__ void StepCarDevice(
     vel = vel + total_force * ((1.0f / mut_cfg.car_mass) * dt);
     pos_bt = pos_bt + (vel * 0.02f) * dt;
     pos = pos_bt * 50.0f;
-    float post_euler_vz = vel.z;
 
     // 14. Angular dynamics integration matching Bullet integrateVelocities
     omega = omega + total_torque_omega * dt;

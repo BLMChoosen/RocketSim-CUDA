@@ -470,7 +470,6 @@ __device__ __forceinline__ void resolve_chassis_arena_collision(
     bool has_contact = false;
     Vec3 sum_normal(0.0f, 0.0f, 0.0f);
     int num_contacts = 0;
-    int contact_indices[8];
     float contact_dists[8];
     Vec3 contact_normals[8];
     Vec3 contact_corners[8];
@@ -498,7 +497,6 @@ __device__ __forceinline__ void resolve_chassis_arena_collision(
         if (dist <= CHASSIS_MARGIN_UU) {
             has_contact = true;
             sum_normal = sum_normal + normal;
-            contact_indices[num_contacts] = i;
             contact_dists[num_contacts] = dist;
             contact_normals[num_contacts] = normal;
             contact_corners[num_contacts] = world_corner;
