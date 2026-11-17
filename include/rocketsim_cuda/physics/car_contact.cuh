@@ -995,6 +995,8 @@ __device__ inline bool resolve_car_pair_collision_device(
 
     bool a_demoed = false;
     bool b_demoed = false;
+    Vec3 bump_impulse_a(0.0f, 0.0f, 0.0f);
+    Vec3 bump_impulse_b(0.0f, 0.0f, 0.0f);
 
     // Apply Bump A -> B
     if (bump_a_to_b.type == CarBumpType::DEMO) {
@@ -1006,7 +1008,7 @@ __device__ inline bool resolve_car_pair_collision_device(
         if (car_state.car_contact_other_car_id) car_state.car_contact_other_car_id[car_idx_a] = (int32_t)car_idx_b;
         if (car_state.car_contact_cooldown_timer) car_state.car_contact_cooldown_timer[car_idx_a] = BUMP_COOLDOWN_TIME;
     } else if (bump_a_to_b.type == CarBumpType::BUMP) {
-        vel_b = vel_b + bump_a_to_b.impulse;
+        bump_impulse_b = bump_a_to_b.impulse;
         if (car_state.car_contact_other_car_id) car_state.car_contact_other_car_id[car_idx_a] = (int32_t)car_idx_b;
         if (car_state.car_contact_cooldown_timer) car_state.car_contact_cooldown_timer[car_idx_a] = BUMP_COOLDOWN_TIME;
     }
@@ -1022,7 +1024,7 @@ __device__ inline bool resolve_car_pair_collision_device(
             if (car_state.car_contact_other_car_id) car_state.car_contact_other_car_id[car_idx_b] = (int32_t)car_idx_a;
             if (car_state.car_contact_cooldown_timer) car_state.car_contact_cooldown_timer[car_idx_b] = BUMP_COOLDOWN_TIME;
         } else if (bump_b_to_a.type == CarBumpType::BUMP) {
-            vel_a = vel_a + bump_b_to_a.impulse;
+            bump_impulse_a = bump_b_to_a.impulse;
             if (car_state.car_contact_other_car_id) car_state.car_contact_other_car_id[car_idx_b] = (int32_t)car_idx_a;
             if (car_state.car_contact_cooldown_timer) car_state.car_contact_cooldown_timer[car_idx_b] = BUMP_COOLDOWN_TIME;
         }
@@ -1035,13 +1037,33 @@ __device__ inline bool resolve_car_pair_collision_device(
         manifold
     );
 
+    // Apply bump impulse cache (Car::_FinishPhysicsTick)
+    if (!a_demoed) vel_a = vel_a + bump_impulse_a;
+    if (!b_demoed) vel_b = vel_b + bump_impulse_b;
+
+    // Velocity Clamping to canonical maximums
+    float speed_a = vel_a.length();
+    if (speed_a > CAR_MAX_SPEED) {
+        vel_a = vel_a * (CAR_MAX_SPEED / speed_a);
+    }
+    float speed_b = vel_b.length();
+    if (speed_b > CAR_MAX_SPEED) {
+        vel_b = vel_b * (CAR_MAX_SPEED / speed_b);
+    }
+
     // Write back updated states to SoA (Coalesced 128-byte transactions)
     car_state.pos_x[car_idx_a] = pos_a.x;
     car_state.pos_y[car_idx_a] = pos_a.y;
     car_state.pos_z[car_idx_a] = pos_a.z;
+    car_state.pos_bt_x[car_idx_a] = pos_a.x * 0.02f;
+    car_state.pos_bt_y[car_idx_a] = pos_a.y * 0.02f;
+    car_state.pos_bt_z[car_idx_a] = pos_a.z * 0.02f;
     car_state.vel_x[car_idx_a] = vel_a.x;
     car_state.vel_y[car_idx_a] = vel_a.y;
     car_state.vel_z[car_idx_a] = vel_a.z;
+    car_state.vel_bt_x[car_idx_a] = vel_a.x * 0.02f;
+    car_state.vel_bt_y[car_idx_a] = vel_a.y * 0.02f;
+    car_state.vel_bt_z[car_idx_a] = vel_a.z * 0.02f;
     car_state.ang_vel_x[car_idx_a] = omega_a.x;
     car_state.ang_vel_y[car_idx_a] = omega_a.y;
     car_state.ang_vel_z[car_idx_a] = omega_a.z;
@@ -1049,9 +1071,15 @@ __device__ inline bool resolve_car_pair_collision_device(
     car_state.pos_x[car_idx_b] = pos_b.x;
     car_state.pos_y[car_idx_b] = pos_b.y;
     car_state.pos_z[car_idx_b] = pos_b.z;
+    car_state.pos_bt_x[car_idx_b] = pos_b.x * 0.02f;
+    car_state.pos_bt_y[car_idx_b] = pos_b.y * 0.02f;
+    car_state.pos_bt_z[car_idx_b] = pos_b.z * 0.02f;
     car_state.vel_x[car_idx_b] = vel_b.x;
     car_state.vel_y[car_idx_b] = vel_b.y;
     car_state.vel_z[car_idx_b] = vel_b.z;
+    car_state.vel_bt_x[car_idx_b] = vel_b.x * 0.02f;
+    car_state.vel_bt_y[car_idx_b] = vel_b.y * 0.02f;
+    car_state.vel_bt_z[car_idx_b] = vel_b.z * 0.02f;
     car_state.ang_vel_x[car_idx_b] = omega_b.x;
     car_state.ang_vel_y[car_idx_b] = omega_b.y;
     car_state.ang_vel_z[car_idx_b] = omega_b.z;

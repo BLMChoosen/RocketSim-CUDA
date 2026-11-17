@@ -21,6 +21,7 @@
 #include "rocketsim_cuda/sim_context.cuh"
 #include "cpu_ref_sim.h"
 #include "golden_master.h"
+#include "scenarios/scenario_registry.h"
 
 namespace rocketsim_cuda {
     bool GetCPURefSimBoostPadState(const CPURefSim* sim, int padIdx, bool& isActive, float& cooldown);
@@ -102,578 +103,21 @@ HarnessArgs ParseArgs(int argc, char** argv) {
     return args;
 }
 
-CarControls GetScenarioControl(const std::string& scenario, uint32_t tick, uint32_t env, DeterministicInputGenerator& gen, uint32_t car = 0) {
-    CarControls c{};
-    if (scenario == "idle" || scenario == "freefall" || scenario == "ball_flight" ||
-        scenario.rfind("ball_", 0) == 0) {
-        return c;
-    } else if (scenario == "car_car_front") {
-        c.throttle = 1.0f;
-        return c;
-    } else if (scenario == "car_car_side") {
-        if (car == 1) {
-            c.throttle = 1.0f;
-        }
-        return c;
-    } else if (scenario == "car_car_rear") {
-        if (car == 0) {
-            c.throttle = 0.5f;
-        } else {
-            c.throttle = 1.0f;
-            c.boost = 1;
-        }
-        return c;
-    } else if (scenario == "car_car_air" || scenario == "car_on_car") {
-        return c;
-    } else if (scenario == "throttle") {
-        c.throttle = 1.0f;
-        return c;
-    } else if (scenario == "boost") {
-        c.throttle = 1.0f;
-        c.boost = 1;
-        return c;
-    } else if (scenario == "jump_flip") {
-        c.throttle = 1.0f;
-        if (tick >= 10 && tick < 15) {
-            c.jump = 1;
-        } else if (tick >= 25 && tick < 30) {
-            c.jump = 1;
-            c.pitch = -1.0f;
-        } else if (tick >= 30) {
-            c.pitch = 1.0f;
-            c.roll = 0.5f;
-        }
-        return c;
-    } else if (scenario == "ablation_5_flips") {
-        // Ablation 5: Canonical flip directions (front, back, left, right, diagonals), stall, and cancel
-        c.throttle = 1.0f;
-        uint32_t mode = env % 11;
-        if (tick >= 10 && tick < 15) {
-            c.jump = 1;
-        } else if (tick >= 25 && tick < 30) {
-            c.jump = 1;
-            switch (mode) {
-                case 0: // Front flip cancel (initiate front flip)
-                case 1: // Front flip (pure)
-                    c.pitch = -1.0f;
-                    break;
-                case 2: // Back flip (pure)
-                case 9: // Back flip cancel (initiate back flip)
-                    c.pitch = 1.0f;
-                    break;
-                case 3: // Left dodge
-                    c.yaw = -1.0f;
-                    break;
-                case 4: // Right dodge
-                    c.yaw = 1.0f;
-                    break;
-                case 5: // Diagonal front-left
-                    c.pitch = -1.0f;
-                    c.yaw = -1.0f;
-                    break;
-                case 6: // Diagonal front-right
-                    c.pitch = -1.0f;
-                    c.yaw = 1.0f;
-                    break;
-                case 7: // Diagonal back-left
-                    c.pitch = 1.0f;
-                    c.yaw = -1.0f;
-                    break;
-                case 8: // Diagonal back-right
-                    c.pitch = 1.0f;
-                    c.yaw = 1.0f;
-                    break;
-                case 10: // Stall: equal and opposite yaw and roll
-                    c.pitch = 0.0f;
-                    c.yaw = 1.0f;
-                    c.roll = -1.0f;
-                    break;
-            }
-        } else if (tick >= 30) {
-            if (mode == 0) {
-                // Front flip cancel: counter-pitch
-                c.pitch = 1.0f;
-                c.roll = 0.5f;
-            } else if (mode == 9) {
-                // Back flip cancel: counter-pitch
-                c.pitch = -1.0f;
-                c.roll = 0.5f;
-            } else if (mode == 10) {
-                // Maintain stall roll/yaw
-                c.yaw = 1.0f;
-                c.roll = -1.0f;
-            }
-        }
-        return c;
-    } else if (scenario == "car_ball_hit" || scenario == "kickoff_goalie") {
-        c.throttle = 1.0f;
-        c.boost = 1;
-        return c;
-    } else if (scenario == "kickoff_multicar") {
-        c.throttle = 1.0f;
-        if (tick >= 10 && tick < 40) {
-            c.boost = 1;
-        }
-        return c;
-    } else if (scenario == "car_side_wall" || scenario == "car_corner_ramp" || scenario == "car_floor_wall_transition") {
-        c.throttle = 1.0f;
-        c.boost = 1;
-        return c;
-    } else if (scenario == "car_jump_wall_land") {
-        c.throttle = 1.0f;
-        if (tick >= 10 && tick < 15) {
-            c.jump = 1;
-        }
-        return c;
-    } else if (scenario == "car_ceiling") {
-        return c;
-    } else if (scenario == "boost_pad_pickup") {
-        if (tick < 50) {
-            c.throttle = 1.0f;
-        }
-        return c;
-    }
+inline CarControls GetScenarioControl(const std::string& scenario, uint32_t tick, uint32_t env, DeterministicInputGenerator& gen) {
+    auto scn = ScenarioRegistry::Instance().Get(scenario);
+    if (scn) return scn->GetControl(tick, env, 0, gen);
     return gen.Generate();
 }
 
-void ApplyScenarioInitialState(const std::string& scenario, CPURefSim& env, uint32_t env_idx) {
-    if (scenario == "car_car_front") {
-        CarStatePOD c0;
-        env.GetCarState(0, c0);
-        c0.pos = Vec3(0.0f, -400.0f, 17.03f);
-        c0.vel = Vec3(0.0f, 800.0f, 0.0f);
-        c0.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c0.boost = 100.0f;
-        env.SetCarState(0, c0);
+inline CarControls GetScenarioControl(const std::string& scenario, uint32_t tick, uint32_t env, uint32_t car_idx, DeterministicInputGenerator& gen) {
+    auto scn = ScenarioRegistry::Instance().Get(scenario);
+    if (scn) return scn->GetControl(tick, env, car_idx, gen);
+    return gen.Generate();
+}
 
-        CarStatePOD c1;
-        env.GetCarState(1, c1);
-        c1.pos = Vec3(0.0f, 400.0f, 17.03f);
-        c1.vel = Vec3(0.0f, -800.0f, 0.0f);
-        c1.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c1.quat = Quat(0.7071068f, 0.0f, 0.0f, -0.7071068f); // Facing -Y
-        c1.boost = 100.0f;
-        env.SetCarState(1, c1);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(-2000.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_car_side") {
-        CarStatePOD c0;
-        env.GetCarState(0, c0);
-        c0.pos = Vec3(0.0f, 0.0f, 17.03f);
-        c0.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c0.boost = 0.0f;
-        env.SetCarState(0, c0);
-
-        CarStatePOD c1;
-        env.GetCarState(1, c1);
-        c1.pos = Vec3(-500.0f, 0.0f, 17.03f);
-        c1.vel = Vec3(1000.0f, 0.0f, 0.0f);
-        c1.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c1.quat = Quat::identity(); // Facing +X
-        c1.boost = 100.0f;
-        env.SetCarState(1, c1);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 2000.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_car_rear") {
-        CarStatePOD c0;
-        env.GetCarState(0, c0);
-        c0.pos = Vec3(0.0f, 200.0f, 17.03f);
-        c0.vel = Vec3(0.0f, 400.0f, 0.0f);
-        c0.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c0.boost = 50.0f;
-        env.SetCarState(0, c0);
-
-        CarStatePOD c1;
-        env.GetCarState(1, c1);
-        c1.pos = Vec3(0.0f, -300.0f, 17.03f);
-        c1.vel = Vec3(0.0f, 1200.0f, 0.0f);
-        c1.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c1.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c1.boost = 100.0f;
-        env.SetCarState(1, c1);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(2000.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_car_air") {
-        CarStatePOD c0;
-        env.GetCarState(0, c0);
-        c0.pos = Vec3(0.0f, -250.0f, 600.0f);
-        c0.vel = Vec3(0.0f, 600.0f, 150.0f);
-        c0.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c0.boost = 0.0f;
-        c0.is_on_ground = 0;
-        env.SetCarState(0, c0);
-
-        CarStatePOD c1;
-        env.GetCarState(1, c1);
-        c1.pos = Vec3(0.0f, 250.0f, 600.0f);
-        c1.vel = Vec3(0.0f, -600.0f, 150.0f);
-        c1.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c1.quat = Quat(0.7071068f, 0.0f, 0.0f, -0.7071068f); // Facing -Y
-        c1.boost = 0.0f;
-        c1.is_on_ground = 0;
-        env.SetCarState(1, c1);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_on_car") {
-        CarStatePOD c0;
-        env.GetCarState(0, c0);
-        c0.pos = Vec3(0.0f, 0.0f, 17.03f);
-        c0.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c0.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c0.boost = 0.0f;
-        env.SetCarState(0, c0);
-
-        CarStatePOD c1;
-        env.GetCarState(1, c1);
-        c1.pos = Vec3(0.0f, 0.0f, 250.0f);
-        c1.vel = Vec3(0.0f, 0.0f, -400.0f);
-        c1.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c1.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f); // Facing +Y
-        c1.boost = 0.0f;
-        c1.is_on_ground = 0;
-        env.SetCarState(1, c1);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(2000.0f, 2000.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "freefall") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(1000.0f, 0.0f, 1500.0f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(-1000.0f, 0.0f, 1500.0f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_flight") {
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 200.0f);
-        b.vel = Vec3(1500.0f, 2000.0f, 1000.0f);
-        b.ang_vel = Vec3(2.0f, 3.0f, -1.0f);
-        env.SetBallState(b);
-    } else if (scenario == "car_ball_hit") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -1000.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f);
-        c.boost = 100.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "kickoff_multicar") {
-        env.ResetToRandomKickoff(static_cast<int>(env_idx));
-    } else if (scenario == "kickoff_goalie") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat(0.7071068f, 0.0f, 0.0f, 0.7071068f);
-        c.boost = 100.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_floor_drop") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 250.0f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_floor_angled") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 250.0f);
-        b.vel = Vec3(500.0f, 0.0f, -300.0f);
-        b.ang_vel = Vec3(0.0f, 3.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_side_wall") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(3500.0f, 0.0f, 500.0f);
-        b.vel = Vec3(1500.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_back_wall") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(2000.0f, 4500.0f, 500.0f);
-        b.vel = Vec3(0.0f, 1500.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_ceiling") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 1600.0f);
-        b.vel = Vec3(0.0f, 0.0f, 1200.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_corner_ramp") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(3450.0f, 4250.0f, 200.0f);
-        b.vel = Vec3(600.0f, 600.0f, -200.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_goal_post") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(892.8f, 4500.0f, 300.0f);
-        b.vel = Vec3(0.0f, 1500.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "ball_crossbar") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, -4608.0f, 17.03f);
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 4500.0f, 642.7f);
-        b.vel = Vec3(0.0f, 1500.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "boost_pad_pickup") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        if (env_idx % 2 == 0) {
-            // Big Pad 0 (Midfield Left: X=-3584, Y=0, Z=73, Rad=208, +100 boost, 10s cooldown / 1201 ticks)
-            c.pos = Vec3(-3644.0f, 0.0f, 17.03f);
-        } else {
-            // Small Pad 19 (Midfield Inner Left: X=-1024, Y=0, Z=70, Rad=144, +12 boost, 4s cooldown / 480 ticks)
-            c.pos = Vec3(-1084.0f, 0.0f, 17.03f);
-        }
-        c.vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-        
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_side_wall") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(3500.0f, 0.0f, 17.03f);
-        c.vel = Vec3(1000.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 100.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_corner_ramp") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(3000.0f, 4000.0f, 17.03f);
-        c.vel = Vec3(500.0f, 500.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat(0.9238795f, 0.0f, 0.0f, 0.3826834f);
-        c.boost = 100.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_ceiling") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(0.0f, 0.0f, 1600.0f);
-        c.vel = Vec3(0.0f, 0.0f, 1200.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 0.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_jump_wall_land") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(3500.0f, 0.0f, 17.03f);
-        c.vel = Vec3(800.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 50.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    } else if (scenario == "car_floor_wall_transition") {
-        CarStatePOD c;
-        env.GetCarState(0, c);
-        c.pos = Vec3(3200.0f, 0.0f, 17.03f);
-        c.vel = Vec3(1200.0f, 0.0f, 0.0f);
-        c.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        c.quat = Quat::identity();
-        c.boost = 100.0f;
-        env.SetCarState(0, c);
-
-        BallStatePOD b;
-        env.GetBallState(b);
-        b.pos = Vec3(0.0f, 0.0f, 93.15f);
-        b.vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.ang_vel = Vec3(0.0f, 0.0f, 0.0f);
-        b.quat = Quat::identity();
-        env.SetBallState(b);
-    }
+inline void ApplyScenarioInitialState(const std::string& scenario, CPURefSim& env, uint32_t env_idx) {
+    auto scn = ScenarioRegistry::Instance().Get(scenario);
+    if (scn) scn->ApplyInitialState(env, env_idx);
 }
 
 struct WindowMetrics {
@@ -947,11 +391,8 @@ bool RunScenarioDifferential(
     if (args.envs < num_threads) num_threads = args.envs;
     ThreadPool thread_pool(num_threads);
 
-    bool is_car_car = (scenario_name == "car_car_front" || scenario_name == "car_car_side" ||
-                       scenario_name == "car_car_rear" || scenario_name == "car_car_air" ||
-                       scenario_name == "car_on_car");
-    uint32_t cars_per_env = (scenario_name == "kickoff_multicar" && args.cars == 1) ? 6 :
-                            (is_car_car && args.cars == 1 ? 2 : args.cars);
+    auto scn_def = ScenarioRegistry::Instance().Get(scenario_name);
+    uint32_t cars_per_env = (args.cars > 1) ? args.cars : (scn_def ? scn_def->GetDefaultCars() : 1);
     SimContext gpu_sim(args.envs, cars_per_env);
 
     std::vector<CPURefSim> lockstep_cpu_envs;
@@ -997,7 +438,7 @@ bool RunScenarioDifferential(
     for (uint32_t t = 0; t < args.ticks; t++) {
         for (uint32_t e = 0; e < args.envs; e++) {
             for (uint32_t c = 0; c < cars_per_env; c++) {
-                step_controls[e * cars_per_env + c] = GetScenarioControl(scenario_name, t, e + c * 100, lockstep_gen, c);
+                step_controls[e * cars_per_env + c] = GetScenarioControl(scenario_name, t, e + c * 100, lockstep_gen);
             }
         }
 
@@ -1076,67 +517,45 @@ bool RunScenarioDifferential(
             if (t < 10000) report.w10000.Update(d_c_pos, d_c_vel, d_c_quat, d_b_pos, d_b_vel, d_susp, d_boost, step_ok);
 
             if (snap_idx >= 0) {
+                const auto& c_cpu = cpu_cars[e];
+                const auto& c_gpu = gpu_cars[e];
                 const auto& b_cpu = cpu_balls[e];
                 const auto& b_gpu = gpu_balls[e];
 
-                float max_c_err[10] = {0.0f};
-                float max_c_rel[10] = {0.0f};
-
-                for (uint32_t car_i = 0; car_i < cars_per_env; ++car_i) {
-                    uint32_t c_idx = e * cars_per_env + car_i;
-                    const auto& c_cpu = cpu_cars[c_idx];
-                    const auto& c_gpu = gpu_cars[c_idx];
-
-                    Quat q_gpu_adj = c_gpu.quat;
-                    float q_dot = c_cpu.quat.w * c_gpu.quat.w +
-                                  c_cpu.quat.x * c_gpu.quat.x +
-                                  c_cpu.quat.y * c_gpu.quat.y +
-                                  c_cpu.quat.z * c_gpu.quat.z;
-                    if (q_dot < 0.0f) {
-                        q_gpu_adj.w = -q_gpu_adj.w;
-                        q_gpu_adj.x = -q_gpu_adj.x;
-                        q_gpu_adj.y = -q_gpu_adj.y;
-                        q_gpu_adj.z = -q_gpu_adj.z;
-                    }
-
-                    float c_cpu_vals[10] = {
-                        c_cpu.pos.x, c_cpu.pos.y, c_cpu.pos.z,
-                        c_cpu.vel.x, c_cpu.vel.y, c_cpu.vel.z,
-                        c_cpu.quat.w, c_cpu.quat.x, c_cpu.quat.y, c_cpu.quat.z
-                    };
-                    float c_gpu_vals[10] = {
-                        c_gpu.pos.x, c_gpu.pos.y, c_gpu.pos.z,
-                        c_gpu.vel.x, c_gpu.vel.y, c_gpu.vel.z,
-                        q_gpu_adj.w, q_gpu_adj.x, q_gpu_adj.y, q_gpu_adj.z
-                    };
-
-                    for (uint32_t comp = 0; comp < 10; ++comp) {
-                        float abs_err = std::fabs(c_cpu_vals[comp] - c_gpu_vals[comp]);
-                        float rel_err = abs_err / (std::fabs(c_cpu_vals[comp]) + 1.0f);
-                        max_c_err[comp] = std::max(max_c_err[comp], abs_err);
-                        max_c_rel[comp] = std::max(max_c_rel[comp], rel_err);
-                    }
+                Quat q_gpu_adj = c_gpu.quat;
+                float q_dot = c_cpu.quat.w * c_gpu.quat.w +
+                              c_cpu.quat.x * c_gpu.quat.x +
+                              c_cpu.quat.y * c_gpu.quat.y +
+                              c_cpu.quat.z * c_gpu.quat.z;
+                if (q_dot < 0.0f) {
+                    q_gpu_adj.w = -q_gpu_adj.w;
+                    q_gpu_adj.x = -q_gpu_adj.x;
+                    q_gpu_adj.y = -q_gpu_adj.y;
+                    q_gpu_adj.z = -q_gpu_adj.z;
                 }
 
-                for (uint32_t comp = 0; comp < 10; ++comp) {
-                    report.baseline.RecordSnapshot(static_cast<size_t>(snap_idx), e, comp, max_c_err[comp], max_c_rel[comp]);
-                }
-
-                float b_cpu_vals[9] = {
+                float cpu_vals[NUM_COMPONENTS] = {
+                    c_cpu.pos.x, c_cpu.pos.y, c_cpu.pos.z,
+                    c_cpu.vel.x, c_cpu.vel.y, c_cpu.vel.z,
+                    c_cpu.quat.w, c_cpu.quat.x, c_cpu.quat.y, c_cpu.quat.z,
                     b_cpu.pos.x, b_cpu.pos.y, b_cpu.pos.z,
                     b_cpu.vel.x, b_cpu.vel.y, b_cpu.vel.z,
                     b_cpu.ang_vel.x, b_cpu.ang_vel.y, b_cpu.ang_vel.z
                 };
-                float b_gpu_vals[9] = {
+
+                float gpu_vals[NUM_COMPONENTS] = {
+                    c_gpu.pos.x, c_gpu.pos.y, c_gpu.pos.z,
+                    c_gpu.vel.x, c_gpu.vel.y, c_gpu.vel.z,
+                    q_gpu_adj.w, q_gpu_adj.x, q_gpu_adj.y, q_gpu_adj.z,
                     b_gpu.pos.x, b_gpu.pos.y, b_gpu.pos.z,
                     b_gpu.vel.x, b_gpu.vel.y, b_gpu.vel.z,
                     b_gpu.ang_vel.x, b_gpu.ang_vel.y, b_gpu.ang_vel.z
                 };
 
-                for (uint32_t comp = 0; comp < 9; ++comp) {
-                    float abs_err = std::fabs(b_cpu_vals[comp] - b_gpu_vals[comp]);
-                    float rel_err = abs_err / (std::fabs(b_cpu_vals[comp]) + 1.0f);
-                    report.baseline.RecordSnapshot(static_cast<size_t>(snap_idx), e, 10 + comp, abs_err, rel_err);
+                for (uint32_t c = 0; c < NUM_COMPONENTS; ++c) {
+                    float abs_err = std::fabs(cpu_vals[c] - gpu_vals[c]);
+                    float rel_err = abs_err / (std::fabs(cpu_vals[c]) + 1.0f);
+                    report.baseline.RecordSnapshot(static_cast<size_t>(snap_idx), e, c, abs_err, rel_err);
                 }
             }
 
@@ -1696,15 +1115,6 @@ inline bool ValidateScenarioThresholds(
 {
     auto it = all_thresholds.find(rep.name);
     if (it == all_thresholds.end()) {
-        for (const auto& kv : all_thresholds) {
-            if (kv.first.find(rep.name) != std::string::npos || rep.name.find(kv.first) != std::string::npos) {
-                it = all_thresholds.find(kv.first);
-                break;
-            }
-        }
-    }
-
-    if (it == all_thresholds.end()) {
         os << "[Warning] No regression thresholds defined for scenario '" << rep.name << "'\n";
         return true;
     }
@@ -1746,17 +1156,19 @@ inline bool ValidateScenarioThresholds(
 }
 
 int main(int argc, char** argv) {
+    RegisterAllScenarios();
     HarnessArgs args = ParseArgs(argc, argv);
 
     if (args.cpu_perturb) {
         std::vector<std::string> scns;
         if (args.scenario == "all") {
-            scns = {"idle", "freefall", "throttle", "boost", "jump_flip", "ablation_5_flips", "ball_flight", "car_ball_hit", "kickoff_goalie",
-                    "boost_pad_pickup", "ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall",
-                    "ball_ceiling", "ball_corner_ramp", "ball_goal_post", "ball_crossbar"};
+            scns = ScenarioRegistry::Instance().GetAllNames();
         } else if (args.scenario == "ball_suite") {
-            scns = {"ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall", "ball_ceiling", "ball_corner_ramp",
-                    "ball_goal_post", "ball_crossbar", "ball_flight"};
+            for (const auto& scn : ScenarioRegistry::Instance().GetAll()) {
+                if (scn->IsBallBounce() || scn->GetName() == "ball_flight") {
+                    scns.push_back(scn->GetName());
+                }
+            }
         } else {
             scns = {args.scenario};
         }
@@ -1951,15 +1363,18 @@ int main(int argc, char** argv) {
 
     std::vector<std::string> scenarios_to_run;
     if (args.scenario == "all") {
-        scenarios_to_run = {"idle", "freefall", "throttle", "boost", "jump_flip", "ablation_5_flips", "ball_flight", "car_ball_hit", "kickoff_goalie",
-                            "boost_pad_pickup", "ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall",
-                            "ball_ceiling", "ball_corner_ramp", "ball_goal_post", "ball_crossbar",
-                            "random", "kickoff_multicar", "car_side_wall", "car_corner_ramp", "car_ceiling", "car_jump_wall_land", "car_floor_wall_transition",
-                            "car_car_front", "car_car_side", "car_car_rear", "car_car_air", "car_on_car"};
+        scenarios_to_run = ScenarioRegistry::Instance().GetAllNames();
     } else if (args.scenario == "ball_suite") {
-        scenarios_to_run = {"ball_floor_drop", "ball_floor_angled", "ball_side_wall", "ball_back_wall", "ball_ceiling", "ball_corner_ramp",
-                            "ball_goal_post", "ball_crossbar", "ball_flight"};
+        for (const auto& scn : ScenarioRegistry::Instance().GetAll()) {
+            if (scn->IsBallBounce() || scn->GetName() == "ball_flight") {
+                scenarios_to_run.push_back(scn->GetName());
+            }
+        }
     } else {
+        if (!ScenarioRegistry::Instance().Has(args.scenario)) {
+            std::cerr << "[-] Error: Unknown scenario '" << args.scenario << "'\n";
+            return 1;
+        }
         scenarios_to_run = {args.scenario};
     }
 
