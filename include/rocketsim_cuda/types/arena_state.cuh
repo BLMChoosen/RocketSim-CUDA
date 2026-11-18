@@ -110,29 +110,29 @@ struct ArenaStateSoA {
 
     __device__ inline ArenaStatePOD get_pod(uint32_t env_idx) const {
         ArenaStatePOD pod;
-        pod.is_goal = is_goal[env_idx];
-        pod.scoring_team = scoring_team[env_idx];
-        pod.is_out_of_bounds = is_out_of_bounds[env_idx];
-        pod.tick_count = tick_count[env_idx];
+        pod.is_goal = is_goal ? is_goal[env_idx] : 0;
+        pod.scoring_team = scoring_team ? scoring_team[env_idx] : 0;
+        pod.is_out_of_bounds = is_out_of_bounds ? is_out_of_bounds[env_idx] : 0;
+        pod.tick_count = tick_count ? tick_count[env_idx] : 0;
         pod.terminated = terminated ? terminated[env_idx] : 0;
         pod.truncated = truncated ? truncated[env_idx] : 0;
         for (uint32_t i = 0; i < MAX_BOOST_PADS; ++i) {
-            pod.pad_is_active[i] = pad_is_active[env_idx * MAX_BOOST_PADS + i];
-            pod.pad_cooldown[i] = pad_cooldown[env_idx * MAX_BOOST_PADS + i];
+            pod.pad_is_active[i] = pad_is_active ? pad_is_active[env_idx * MAX_BOOST_PADS + i] : 0;
+            pod.pad_cooldown[i] = pad_cooldown ? pad_cooldown[env_idx * MAX_BOOST_PADS + i] : 0.0f;
         }
         return pod;
     }
 
     __device__ inline void set_pod(uint32_t env_idx, const ArenaStatePOD& pod) {
-        is_goal[env_idx] = pod.is_goal;
-        scoring_team[env_idx] = pod.scoring_team;
-        is_out_of_bounds[env_idx] = pod.is_out_of_bounds;
-        tick_count[env_idx] = pod.tick_count;
+        if (is_goal) is_goal[env_idx] = pod.is_goal;
+        if (scoring_team) scoring_team[env_idx] = pod.scoring_team;
+        if (is_out_of_bounds) is_out_of_bounds[env_idx] = pod.is_out_of_bounds;
+        if (tick_count) tick_count[env_idx] = pod.tick_count;
         if (terminated) terminated[env_idx] = pod.terminated;
         if (truncated) truncated[env_idx] = pod.truncated;
         for (uint32_t i = 0; i < MAX_BOOST_PADS; ++i) {
-            pad_is_active[env_idx * MAX_BOOST_PADS + i] = pod.pad_is_active[i];
-            pad_cooldown[env_idx * MAX_BOOST_PADS + i] = pod.pad_cooldown[i];
+            if (pad_is_active) pad_is_active[env_idx * MAX_BOOST_PADS + i] = pod.pad_is_active[i];
+            if (pad_cooldown) pad_cooldown[env_idx * MAX_BOOST_PADS + i] = pod.pad_cooldown[i];
         }
     }
 };

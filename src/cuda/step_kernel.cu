@@ -481,12 +481,11 @@ __global__ void StepSimulationKernel(
             if (car_state.ball_touched) {
                 car_state.ball_touched[car_idx] = 1;
             }
-            car_state.pos_z[car_idx] += car_state.vel_z[car_idx] * dt;
         }
     }
 
-    // Step Arena Termination & Boost Pads
-    if (arena_state.is_goal) {
+    // Step Arena Termination & Rewards
+    if (arena_state.is_goal || arena_state.terminated || arena_state.rewards || arena_state.is_out_of_bounds) {
         float bx = ball_state.pos_x[env_idx];
         float by = ball_state.pos_y[env_idx];
         float bz = ball_state.pos_z[env_idx];
@@ -504,14 +503,20 @@ __global__ void StepSimulationKernel(
                 score_team = 1;
             }
         }
-        arena_state.is_goal[env_idx] = goal_flag;
-        arena_state.scoring_team[env_idx] = score_team;
+        if (arena_state.is_goal) {
+            arena_state.is_goal[env_idx] = goal_flag;
+        }
+        if (arena_state.scoring_team) {
+            arena_state.scoring_team[env_idx] = score_team;
+        }
 
         uint8_t oob_flag = 0;
         if (bz > ARENA_HEIGHT + 200.0f || fabsf(bx) > ARENA_EXTENT_X + 500.0f || fabsf(by) > ARENA_EXTENT_Y + 1200.0f) {
             oob_flag = 1;
         }
-        arena_state.is_out_of_bounds[env_idx] = oob_flag;
+        if (arena_state.is_out_of_bounds) {
+            arena_state.is_out_of_bounds[env_idx] = oob_flag;
+        }
 
         if (arena_state.terminated) {
             arena_state.terminated[env_idx] = (goal_flag || oob_flag) ? 1 : 0;
@@ -532,51 +537,52 @@ __global__ void StepSimulationKernel(
                 arena_state.rewards[car_idx] = rew;
             }
         }
+    }
 
-        if (arena_state.pad_cooldown) {
-            for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
-                uint32_t pad_idx = env_idx * MAX_BOOST_PADS + p;
-                float cd = arena_state.pad_cooldown[pad_idx];
-                if (cd > 0.0f) {
-                    cd -= dt;
-                    if (cd <= 0.0f) {
-                        cd = 0.0f;
-                        if (arena_state.pad_is_active) {
-                            arena_state.pad_is_active[pad_idx] = 1;
-                        }
+    // Step Boost Pad Cooldowns
+    if (arena_state.pad_cooldown) {
+        for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
+            uint32_t pad_idx = env_idx * MAX_BOOST_PADS + p;
+            float cd = arena_state.pad_cooldown[pad_idx];
+            if (cd > 0.0f) {
+                cd -= dt;
+                if (cd <= 0.0f) {
+                    cd = 0.0f;
+                    if (arena_state.pad_is_active) {
+                        arena_state.pad_is_active[pad_idx] = 1;
                     }
-                    arena_state.pad_cooldown[pad_idx] = cd;
                 }
+                arena_state.pad_cooldown[pad_idx] = cd;
             }
         }
+    }
 
-        // Proximity Boost Pickup for cars in this environment
-        if (arena_state.pad_is_active) {
-            for (uint32_t c = 0; c < cars_per_env; ++c) {
-                uint32_t car_idx = env_idx * cars_per_env + c;
-                if (car_state.is_demoed && car_state.is_demoed[car_idx]) continue;
-                float current_boost = car_state.boost[car_idx];
-                if (current_boost >= BOOST_MAX) continue;
+    // Proximity Boost Pickup for cars in this environment
+    if (arena_state.pad_is_active) {
+        for (uint32_t c = 0; c < cars_per_env; ++c) {
+            uint32_t car_idx = env_idx * cars_per_env + c;
+            if (car_state.is_demoed && car_state.is_demoed[car_idx]) continue;
+            float current_boost = car_state.boost[car_idx];
+            if (current_boost >= BOOST_MAX) continue;
 
-                Vec3 car_pos(car_state.pos_x[car_idx], car_state.pos_y[car_idx], car_state.pos_z[car_idx]);
-                for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
-                    uint32_t pad_idx = env_idx * MAX_BOOST_PADS + p;
-                    if (arena_state.pad_is_active[pad_idx]) {
-                        const BoostPadDef& pad = SOCCAR_BOOST_PADS[p];
-                        float dz = fabsf(car_pos.z - pad.z);
-                        if (dz < 95.0f) {
-                            float dx = car_pos.x - pad.x;
-                            float dy = car_pos.y - pad.y;
-                            if ((dx * dx + dy * dy) < pad.radius_sq) {
-                                current_boost = fminf(current_boost + pad.boost_amount, BOOST_MAX);
-                                car_state.boost[car_idx] = current_boost;
-                                arena_state.pad_is_active[pad_idx] = 0;
-                                if (arena_state.pad_cooldown) {
-                                    arena_state.pad_cooldown[pad_idx] = pad.is_big ? mut_cfg.boost_pad_cooldown_big : mut_cfg.boost_pad_cooldown_small;
-                                }
-                                if (current_boost >= BOOST_MAX) {
-                                    break;
-                                }
+            Vec3 car_pos(car_state.pos_x[car_idx], car_state.pos_y[car_idx], car_state.pos_z[car_idx]);
+            for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
+                uint32_t pad_idx = env_idx * MAX_BOOST_PADS + p;
+                if (arena_state.pad_is_active[pad_idx]) {
+                    const BoostPadDef& pad = SOCCAR_BOOST_PADS[p];
+                    float dz = fabsf(car_pos.z - pad.z);
+                    if (dz < 95.0f) {
+                        float dx = car_pos.x - pad.x;
+                        float dy = car_pos.y - pad.y;
+                        if ((dx * dx + dy * dy) < pad.radius_sq) {
+                            current_boost = fminf(current_boost + pad.boost_amount, BOOST_MAX);
+                            car_state.boost[car_idx] = current_boost;
+                            arena_state.pad_is_active[pad_idx] = 0;
+                            if (arena_state.pad_cooldown) {
+                                arena_state.pad_cooldown[pad_idx] = pad.is_big ? mut_cfg.boost_pad_cooldown_big : mut_cfg.boost_pad_cooldown_small;
+                            }
+                            if (current_boost >= BOOST_MAX) {
+                                break;
                             }
                         }
                     }

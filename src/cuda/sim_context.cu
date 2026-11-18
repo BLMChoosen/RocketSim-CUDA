@@ -191,22 +191,21 @@ __device__ inline void init_single_car(
 }
 
 __device__ inline void init_single_arena(ArenaStateSoA& arena_state, uint32_t env_idx, uint32_t cars_per_env = 1) {
-    if (arena_state.is_goal) {
-        arena_state.is_goal[env_idx] = 0;
-        arena_state.scoring_team[env_idx] = 0;
-        arena_state.is_out_of_bounds[env_idx] = 0;
-        arena_state.tick_count[env_idx] = 0;
-        if (arena_state.terminated) arena_state.terminated[env_idx] = 0;
-        if (arena_state.truncated) arena_state.truncated[env_idx] = 0;
-        if (arena_state.rewards) {
-            for (uint32_t c = 0; c < cars_per_env; ++c) {
-                arena_state.rewards[env_idx * cars_per_env + c] = 0.0f;
-            }
+    if (arena_state.is_goal) arena_state.is_goal[env_idx] = 0;
+    if (arena_state.scoring_team) arena_state.scoring_team[env_idx] = 0;
+    if (arena_state.is_out_of_bounds) arena_state.is_out_of_bounds[env_idx] = 0;
+    if (arena_state.tick_count) arena_state.tick_count[env_idx] = 0;
+    if (arena_state.terminated) arena_state.terminated[env_idx] = 0;
+    if (arena_state.truncated) arena_state.truncated[env_idx] = 0;
+    if (arena_state.rewards) {
+        for (uint32_t c = 0; c < cars_per_env; ++c) {
+            arena_state.rewards[env_idx * cars_per_env + c] = 0.0f;
         }
-        for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
-            arena_state.pad_is_active[env_idx * MAX_BOOST_PADS + p] = 1;
-            arena_state.pad_cooldown[env_idx * MAX_BOOST_PADS + p] = 0.0f;
-        }
+    }
+    for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
+        uint32_t pad_idx = env_idx * MAX_BOOST_PADS + p;
+        if (arena_state.pad_is_active) arena_state.pad_is_active[pad_idx] = 1;
+        if (arena_state.pad_cooldown) arena_state.pad_cooldown[pad_idx] = 0.0f;
     }
 }
 

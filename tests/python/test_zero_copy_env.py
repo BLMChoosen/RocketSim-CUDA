@@ -289,5 +289,104 @@ def test_boost_pad_proximity_pickup():
     env.close()
 
 
+def test_boost_pad_cooldown_and_reactivation():
+    """
+    Test 6 (Boost Pad Cooldown Countdown & Reactivation):
+    Verify boost pad cooldown decrements independently of goal state and reactivates pad
+    when cooldown reaches zero.
+    """
+    num_envs = 2
+    cars_per_env = 1
+    env = RocketSimBatchedEnv(num_envs=num_envs, cars_per_env=cars_per_env)
+    env.reset()
+
+    # Move cars far away from all pads to prevent immediate re-pickup
+    car_obs = env.get_car_observations()
+    for e in range(num_envs):
+        car_obs[e, 0, 0] = 0.0
+        car_obs[e, 0, 1] = 0.0
+        car_obs[e, 0, 2] = 1000.0  # High in the air
+
+    pad_active = env.sim.get_pad_is_active()
+    pad_cd = env.sim.get_pad_cooldown()
+
+    # Artificially set Pad 0 cooldown to ~2.5 ticks worth (0.021s at dt=1/120s ~ 0.008333s)
+    pad_active[0, 0] = 0
+    pad_cd[0, 0] = 0.021
+
+    # Tick 1: cooldown should decrease by dt (1/120 ~ 0.008333)
+    env.sim.step()
+    cd_1 = float(pad_cd[0, 0])
+    assert 0.011 < cd_1 < 0.014, f"Expected cooldown ~0.0127s, got {cd_1}"
+    assert pad_active[0, 0] == 0, "Pad should remain inactive while cooldown > 0"
+
+    # Tick 2: cooldown decreases further
+    env.sim.step()
+    cd_2 = float(pad_cd[0, 0])
+    assert 0.003 < cd_2 < 0.006, f"Expected cooldown ~0.0043s, got {cd_2}"
+    assert pad_active[0, 0] == 0, "Pad should remain inactive while cooldown > 0"
+
+    # Tick 3: cooldown expires (<= 0), pad becomes active
+    env.sim.step()
+    cd_3 = float(pad_cd[0, 0])
+    assert cd_3 == 0.0, f"Expected cooldown 0.0s, got {cd_3}"
+    assert pad_active[0, 0] == 1, "Pad should reactivate when cooldown expires"
+
+    env.close()
+
+
+def test_simultaneous_boost_pad_pickup_multi_car():
+    """
+    Test 7 (Simultaneous Multi-Car Boost Pad Contestation):
+    Verify that when multiple cars contest the exact same boost pad on the same tick:
+    1. Exactly one car (deterministic lower car index) receives the boost.
+    2. The other car does not receive the boost (pad is deactivated).
+    3. Pad is deactivated with the proper cooldown.
+    """
+    num_envs = 1
+    cars_per_env = 2
+    env = RocketSimBatchedEnv(num_envs=num_envs, cars_per_env=cars_per_env)
+    env.reset()
+
+    car_obs = env.get_car_observations()
+    pad_active = env.sim.get_pad_is_active()
+    pad_cd = env.sim.get_pad_cooldown()
+
+    # Position both Car 0 and Car 1 within Big Pad 0's pickup radius (radius = 208.0 UU)
+    # separated along X by 100.0 UU so they do not collide into each other:
+    # Car 0 at (-3584 - 50, 0, 17) -> distance = 50 < 208
+    # Car 1 at (-3584 + 50, 0, 17) -> distance = 50 < 208
+    # Both start with partial boost (10.0)
+    car_obs[0, 0, 0] = -3584.0 - 50.0
+    car_obs[0, 0, 1] = 0.0
+    car_obs[0, 0, 2] = 17.0
+    car_obs[0, 0, 13] = 10.0
+
+    car_obs[0, 1, 0] = -3584.0 + 50.0
+    car_obs[0, 1, 1] = 0.0
+    car_obs[0, 1, 2] = 17.0
+    car_obs[0, 1, 13] = 10.0
+
+    assert pad_active[0, 0] == 1, "Pad 0 should be active initially"
+
+    # Step simulation 1 tick
+    env.sim.step()
+
+    new_car_obs = env.get_car_observations()
+    boost_0 = float(new_car_obs[0, 0, 13])
+    boost_1 = float(new_car_obs[0, 1, 13])
+
+    # Exactly one car (car 0) must have received full boost
+    assert abs(boost_0 - 100.0) < 1e-2, f"Expected car 0 to get 100.0 boost, got {boost_0}"
+    # Car 1 must NOT have received boost (remains at 10.0)
+    assert abs(boost_1 - 10.0) < 1e-2, f"Expected car 1 to remain at 10.0 boost, got {boost_1}"
+
+    # Pad 0 must be inactive with ~10.0s cooldown
+    assert pad_active[0, 0] == 0, "Pad 0 should be deactivated"
+    assert pad_cd[0, 0] > 9.9, f"Pad 0 cooldown should be ~10.0s, got {pad_cd[0, 0]}"
+
+    env.close()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
