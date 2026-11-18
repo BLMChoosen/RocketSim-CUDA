@@ -296,6 +296,31 @@ void CPURefSim::GetCarState(int carIdx, CarStatePOD& out) const {
     out.last_controls.boost     = cs.lastControls.boost ? 1 : 0;
     out.last_controls.jump      = cs.lastControls.jump ? 1 : 0;
     out.last_controls.handbrake = cs.lastControls.handbrake ? 1 : 0;
+
+    out.is_boosting             = cs.isBoosting ? 1 : 0;
+    out.boosting_time           = cs.boostingTime;
+    out.handbrake_val           = cs.handbrakeVal;
+    out.is_jumping              = cs.isJumping ? 1 : 0;
+    out.jump_time               = cs.jumpTime;
+    out.air_time_since_jump     = cs.airTimeSinceJump;
+    out.flip_time               = cs.flipTime;
+    out.is_flipping             = cs.isFlipping ? 1 : 0;
+
+    out.time_since_boosted      = cs.timeSinceBoosted;
+    out.air_time                = cs.airTime;
+    out.flip_rel_torque         = Vec3(cs.flipRelTorque.x, cs.flipRelTorque.y, cs.flipRelTorque.z);
+    out.is_auto_flipping        = cs.isAutoFlipping ? 1 : 0;
+    out.auto_flip_timer         = cs.autoFlipTimer;
+    out.auto_flip_torque_scale  = cs.autoFlipTorqueScale;
+    out.supersonic_time         = cs.supersonicTime;
+    out.world_contact_has_contact = cs.worldContact.hasContact ? 1 : 0;
+    out.world_contact_normal    = Vec3(cs.worldContact.contactNormal.x, cs.worldContact.contactNormal.y, cs.worldContact.contactNormal.z);
+    out.car_contact_other_car_id   = static_cast<int32_t>(cs.carContact.otherCarID);
+    out.car_contact_cooldown_timer = cs.carContact.cooldownTimer;
+    out.ball_hit_is_valid       = cs.ballHitInfo.isValid ? 1 : 0;
+    out.ball_hit_rel_pos        = Vec3(cs.ballHitInfo.relativePosOnBall.x, cs.ballHitInfo.relativePosOnBall.y, cs.ballHitInfo.relativePosOnBall.z);
+    out.ball_hit_extra_hit_force = Vec3(cs.ballHitInfo.extraHitVel.x, cs.ballHitInfo.extraHitVel.y, cs.ballHitInfo.extraHitVel.z);
+    out.ball_hit_tick_count     = cs.ballHitInfo.tickCountWhenHit;
 }
 
 void CPURefSim::GetWheelDebug(int carIdx, int w, float& susp_force, float& v_rel, float& pushback, float& comp_bt) const {
@@ -347,6 +372,34 @@ void CPURefSim::SetCarState(int carIdx, const CarStatePOD& in) {
     cs.isDemoed = (in.is_demoed != 0);
     cs.isSupersonic = (in.is_supersonic != 0);
     cs.demoRespawnTimer = in.demo_respawn_timer;
+
+    cs.isBoosting = (in.is_boosting != 0);
+    cs.boostingTime = in.boosting_time;
+    cs.handbrakeVal = in.handbrake_val;
+    cs.isJumping = (in.is_jumping != 0);
+    cs.jumpTime = in.jump_time;
+    cs.airTimeSinceJump = in.air_time_since_jump;
+    cs.flipTime = in.flip_time;
+    cs.isFlipping = (in.is_flipping != 0);
+
+    cs.timeSinceBoosted = in.time_since_boosted;
+    cs.airTime = in.air_time;
+    cs.flipRelTorque = RocketSim::Vec(in.flip_rel_torque.x, in.flip_rel_torque.y, in.flip_rel_torque.z);
+    cs.isAutoFlipping = (in.is_auto_flipping != 0);
+    cs.autoFlipTimer = in.auto_flip_timer;
+    cs.autoFlipTorqueScale = in.auto_flip_torque_scale;
+    cs.supersonicTime = in.supersonic_time;
+    cs.worldContact.hasContact = (in.world_contact_has_contact != 0);
+    cs.worldContact.contactNormal = RocketSim::Vec(in.world_contact_normal.x, in.world_contact_normal.y, in.world_contact_normal.z);
+    cs.carContact.otherCarID = (in.car_contact_other_car_id >= 0) ? static_cast<uint32_t>(in.car_contact_other_car_id) : 0;
+    cs.carContact.cooldownTimer = in.car_contact_cooldown_timer;
+    if (in.ball_hit_is_valid) {
+        cs.ballHitInfo.isValid = true;
+        cs.ballHitInfo.relativePosOnBall = RocketSim::Vec(in.ball_hit_rel_pos.x, in.ball_hit_rel_pos.y, in.ball_hit_rel_pos.z);
+        cs.ballHitInfo.extraHitVel = RocketSim::Vec(in.ball_hit_extra_hit_force.x, in.ball_hit_extra_hit_force.y, in.ball_hit_extra_hit_force.z);
+        cs.ballHitInfo.tickCountWhenHit = in.ball_hit_tick_count;
+    }
+
     if (in.ball_touched && m_arena) {
         cs.ballHitInfo.isValid = true;
         cs.ballHitInfo.tickCountWhenHit = m_arena->tickCount;

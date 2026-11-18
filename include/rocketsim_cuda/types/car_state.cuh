@@ -39,6 +39,23 @@ struct CarStatePOD {
     uint8_t is_flipping         = 0;
 
     CarControls last_controls;
+
+    // Extended persistence fields (matching CarStateSoA and Bullet/RocketSim CarState)
+    float time_since_boosted    = 0.0f;
+    float air_time              = 0.0f;
+    Vec3 flip_rel_torque        = Vec3(0.0f, 0.0f, 0.0f);
+    uint8_t is_auto_flipping    = 0;
+    float auto_flip_timer       = 0.0f;
+    float auto_flip_torque_scale = 0.0f;
+    float supersonic_time       = 0.0f;
+    uint8_t world_contact_has_contact = 0;
+    Vec3 world_contact_normal   = Vec3(0.0f, 0.0f, 0.0f);
+    int32_t car_contact_other_car_id  = -1;
+    float car_contact_cooldown_timer  = 0.0f;
+    uint8_t ball_hit_is_valid   = 0;
+    Vec3 ball_hit_rel_pos       = Vec3(0.0f, 0.0f, 0.0f);
+    Vec3 ball_hit_extra_hit_force = Vec3(0.0f, 0.0f, 0.0f);
+    uint64_t ball_hit_tick_count = 0;
 };
 
 // Device SoA structure for N cars (passed by value to CUDA kernels)
@@ -233,6 +250,38 @@ struct CarStateSoA {
         pod.last_controls.boost     = last_controls_boost[idx];
         pod.last_controls.jump      = last_controls_jump[idx];
         pod.last_controls.handbrake = last_controls_handbrake[idx];
+
+        pod.time_since_boosted      = time_since_boosted ? time_since_boosted[idx] : 0.0f;
+        pod.air_time                = air_time ? air_time[idx] : 0.0f;
+        pod.flip_rel_torque         = Vec3(
+            flip_rel_torque_x ? flip_rel_torque_x[idx] : 0.0f,
+            flip_rel_torque_y ? flip_rel_torque_y[idx] : 0.0f,
+            flip_rel_torque_z ? flip_rel_torque_z[idx] : 0.0f
+        );
+        pod.is_auto_flipping        = is_auto_flipping ? is_auto_flipping[idx] : 0;
+        pod.auto_flip_timer         = auto_flip_timer ? auto_flip_timer[idx] : 0.0f;
+        pod.auto_flip_torque_scale  = auto_flip_torque_scale ? auto_flip_torque_scale[idx] : 0.0f;
+        pod.supersonic_time         = supersonic_time ? supersonic_time[idx] : 0.0f;
+        pod.world_contact_has_contact = world_contact_has_contact ? world_contact_has_contact[idx] : 0;
+        pod.world_contact_normal    = Vec3(
+            world_contact_normal_x ? world_contact_normal_x[idx] : 0.0f,
+            world_contact_normal_y ? world_contact_normal_y[idx] : 0.0f,
+            world_contact_normal_z ? world_contact_normal_z[idx] : 0.0f
+        );
+        pod.car_contact_other_car_id   = car_contact_other_car_id ? car_contact_other_car_id[idx] : -1;
+        pod.car_contact_cooldown_timer = car_contact_cooldown_timer ? car_contact_cooldown_timer[idx] : 0.0f;
+        pod.ball_hit_is_valid       = ball_hit_is_valid ? ball_hit_is_valid[idx] : 0;
+        pod.ball_hit_rel_pos        = Vec3(
+            ball_hit_rel_pos_x ? ball_hit_rel_pos_x[idx] : 0.0f,
+            ball_hit_rel_pos_y ? ball_hit_rel_pos_y[idx] : 0.0f,
+            ball_hit_rel_pos_z ? ball_hit_rel_pos_z[idx] : 0.0f
+        );
+        pod.ball_hit_extra_hit_force = Vec3(
+            ball_hit_extra_hit_force_x ? ball_hit_extra_hit_force_x[idx] : 0.0f,
+            ball_hit_extra_hit_force_y ? ball_hit_extra_hit_force_y[idx] : 0.0f,
+            ball_hit_extra_hit_force_z ? ball_hit_extra_hit_force_z[idx] : 0.0f
+        );
+        pod.ball_hit_tick_count     = ball_hit_tick_count ? ball_hit_tick_count[idx] : 0;
         return pod;
     }
 
@@ -287,6 +336,30 @@ struct CarStateSoA {
         last_controls_boost[idx]      = pod.last_controls.boost;
         last_controls_jump[idx]       = pod.last_controls.jump;
         last_controls_handbrake[idx]  = pod.last_controls.handbrake;
+
+        if (time_since_boosted) time_since_boosted[idx] = pod.time_since_boosted;
+        if (air_time) air_time[idx] = pod.air_time;
+        if (flip_rel_torque_x) flip_rel_torque_x[idx] = pod.flip_rel_torque.x;
+        if (flip_rel_torque_y) flip_rel_torque_y[idx] = pod.flip_rel_torque.y;
+        if (flip_rel_torque_z) flip_rel_torque_z[idx] = pod.flip_rel_torque.z;
+        if (is_auto_flipping) is_auto_flipping[idx] = pod.is_auto_flipping;
+        if (auto_flip_timer) auto_flip_timer[idx] = pod.auto_flip_timer;
+        if (auto_flip_torque_scale) auto_flip_torque_scale[idx] = pod.auto_flip_torque_scale;
+        if (supersonic_time) supersonic_time[idx] = pod.supersonic_time;
+        if (world_contact_has_contact) world_contact_has_contact[idx] = pod.world_contact_has_contact;
+        if (world_contact_normal_x) world_contact_normal_x[idx] = pod.world_contact_normal.x;
+        if (world_contact_normal_y) world_contact_normal_y[idx] = pod.world_contact_normal.y;
+        if (world_contact_normal_z) world_contact_normal_z[idx] = pod.world_contact_normal.z;
+        if (car_contact_other_car_id) car_contact_other_car_id[idx] = pod.car_contact_other_car_id;
+        if (car_contact_cooldown_timer) car_contact_cooldown_timer[idx] = pod.car_contact_cooldown_timer;
+        if (ball_hit_is_valid) ball_hit_is_valid[idx] = pod.ball_hit_is_valid;
+        if (ball_hit_rel_pos_x) ball_hit_rel_pos_x[idx] = pod.ball_hit_rel_pos.x;
+        if (ball_hit_rel_pos_y) ball_hit_rel_pos_y[idx] = pod.ball_hit_rel_pos.y;
+        if (ball_hit_rel_pos_z) ball_hit_rel_pos_z[idx] = pod.ball_hit_rel_pos.z;
+        if (ball_hit_extra_hit_force_x) ball_hit_extra_hit_force_x[idx] = pod.ball_hit_extra_hit_force.x;
+        if (ball_hit_extra_hit_force_y) ball_hit_extra_hit_force_y[idx] = pod.ball_hit_extra_hit_force.y;
+        if (ball_hit_extra_hit_force_z) ball_hit_extra_hit_force_z[idx] = pod.ball_hit_extra_hit_force.z;
+        if (ball_hit_tick_count) ball_hit_tick_count[idx] = pod.ball_hit_tick_count;
     }
 };
 

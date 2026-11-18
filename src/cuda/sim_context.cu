@@ -1,4 +1,5 @@
 #include "rocketsim_cuda/sim_context.cuh"
+#include "rocketsim_cuda/physics/ball_dynamics.cuh"
 #include <stdexcept>
 #include <iostream>
 
@@ -789,6 +790,433 @@ void SimContext::CopyControlsToDevice(const CarControls* host_in, uint32_t car_s
     k_import_controls<<<blocks, threads, 0, m_stream>>>(m_controls, d_staging, count, car_start);
 
     if (m_stream) cudaStreamSynchronize(m_stream); else cudaDeviceSynchronize();
+}
+
+// ============================================================================
+// State Setters & Ball Trajectory Prediction Kernels
+// ============================================================================
+
+namespace {
+
+__global__ void k_set_ball_state_tensor(
+    BallStateSoA dst,
+    uint32_t num_envs,
+    const float* __restrict__ src_tensor,
+    uint32_t count,
+    uint32_t start_env,
+    const int32_t* __restrict__ d_indices,
+    uint32_t num_cols,
+    int64_t stride_env,
+    int64_t stride_col)
+{
+    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) return;
+
+    int32_t raw_idx = d_indices ? d_indices[i] : static_cast<int32_t>(start_env + i);
+    if (raw_idx < 0 || static_cast<uint32_t>(raw_idx) >= num_envs) return;
+    uint32_t env_idx = static_cast<uint32_t>(raw_idx);
+
+    const float* row = src_tensor + (i * stride_env);
+
+    dst.pos_x[env_idx] = row[0 * stride_col];
+    dst.pos_y[env_idx] = row[1 * stride_col];
+    dst.pos_z[env_idx] = row[2 * stride_col];
+
+    dst.vel_x[env_idx] = row[3 * stride_col];
+    dst.vel_y[env_idx] = row[4 * stride_col];
+    dst.vel_z[env_idx] = row[5 * stride_col];
+
+    if (num_cols >= 13) {
+        dst.q_w[env_idx] = row[6 * stride_col];
+        dst.q_x[env_idx] = row[7 * stride_col];
+        dst.q_y[env_idx] = row[8 * stride_col];
+        dst.q_z[env_idx] = row[9 * stride_col];
+
+        dst.ang_vel_x[env_idx] = row[10 * stride_col];
+        dst.ang_vel_y[env_idx] = row[11 * stride_col];
+        dst.ang_vel_z[env_idx] = row[12 * stride_col];
+    } else if (num_cols >= 9) {
+        dst.q_w[env_idx] = 1.0f;
+        dst.q_x[env_idx] = 0.0f;
+        dst.q_y[env_idx] = 0.0f;
+        dst.q_z[env_idx] = 0.0f;
+
+        dst.ang_vel_x[env_idx] = row[6 * stride_col];
+        dst.ang_vel_y[env_idx] = row[7 * stride_col];
+        dst.ang_vel_z[env_idx] = row[8 * stride_col];
+    } else {
+        dst.q_w[env_idx] = 1.0f;
+        dst.q_x[env_idx] = 0.0f;
+        dst.q_y[env_idx] = 0.0f;
+        dst.q_z[env_idx] = 0.0f;
+
+        dst.ang_vel_x[env_idx] = 0.0f;
+        dst.ang_vel_y[env_idx] = 0.0f;
+        dst.ang_vel_z[env_idx] = 0.0f;
+    }
+}
+
+__global__ void k_set_car_state_tensor(
+    CarStateSoA dst,
+    uint32_t total_cars,
+    uint32_t cars_per_env,
+    const float* __restrict__ src_tensor,
+    uint32_t count,
+    uint32_t start_car,
+    const int32_t* __restrict__ d_indices,
+    uint32_t num_cols,
+    int64_t stride_env,
+    int64_t stride_car,
+    int64_t stride_col)
+{
+    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) return;
+
+    int32_t raw_idx = d_indices ? d_indices[i] : static_cast<int32_t>(start_car + i);
+    if (raw_idx < 0 || static_cast<uint32_t>(raw_idx) >= total_cars) return;
+    uint32_t car_idx = static_cast<uint32_t>(raw_idx);
+
+    int64_t row_offset;
+    if (stride_env != 0 && cars_per_env > 0) {
+        int64_t e = i / cars_per_env;
+        int64_t c = i % cars_per_env;
+        row_offset = e * stride_env + c * stride_car;
+    } else {
+        row_offset = i * stride_car;
+    }
+    const float* row = src_tensor + row_offset;
+
+    float px = row[0 * stride_col];
+    float py = row[1 * stride_col];
+    float pz = row[2 * stride_col];
+
+    float vx = row[3 * stride_col];
+    float vy = row[4 * stride_col];
+    float vz = row[5 * stride_col];
+
+    dst.pos_x[car_idx] = px;
+    dst.pos_y[car_idx] = py;
+    dst.pos_z[car_idx] = pz;
+
+    dst.pos_bt_x[car_idx] = px * 0.02f;
+    dst.pos_bt_y[car_idx] = py * 0.02f;
+    dst.pos_bt_z[car_idx] = pz * 0.02f;
+
+    dst.vel_x[car_idx] = vx;
+    dst.vel_y[car_idx] = vy;
+    dst.vel_z[car_idx] = vz;
+
+    dst.vel_bt_x[car_idx] = vx * 0.02f;
+    dst.vel_bt_y[car_idx] = vy * 0.02f;
+    dst.vel_bt_z[car_idx] = vz * 0.02f;
+
+    float qw = 1.0f, qx = 0.0f, qy = 0.0f, qz = 0.0f;
+    float wx = 0.0f, wy = 0.0f, wz = 0.0f;
+    float b_val = BOOST_SPAWN;
+
+    if (num_cols >= 14) {
+        qw = row[6 * stride_col];
+        qx = row[7 * stride_col];
+        qy = row[8 * stride_col];
+        qz = row[9 * stride_col];
+        wx = row[10 * stride_col];
+        wy = row[11 * stride_col];
+        wz = row[12 * stride_col];
+        b_val = row[13 * stride_col];
+    } else if (num_cols >= 13) {
+        qw = row[6 * stride_col];
+        qx = row[7 * stride_col];
+        qy = row[8 * stride_col];
+        qz = row[9 * stride_col];
+        wx = row[10 * stride_col];
+        wy = row[11 * stride_col];
+        wz = row[12 * stride_col];
+    } else if (num_cols >= 9) {
+        wx = row[6 * stride_col];
+        wy = row[7 * stride_col];
+        wz = row[8 * stride_col];
+    }
+
+    dst.q_w[car_idx] = qw;
+    dst.q_x[car_idx] = qx;
+    dst.q_y[car_idx] = qy;
+    dst.q_z[car_idx] = qz;
+
+    dst.ang_vel_x[car_idx] = wx;
+    dst.ang_vel_y[car_idx] = wy;
+    dst.ang_vel_z[car_idx] = wz;
+
+    dst.boost[car_idx] = b_val;
+
+    // Reset transient mechanics on state reset
+    dst.is_on_ground[car_idx] = (pz <= 17.5f) ? 1 : 0;
+    dst.has_jumped[car_idx] = 0;
+    dst.is_jumping[car_idx] = 0;
+    dst.jump_time[car_idx] = 0.0f;
+    dst.has_double_jumped[car_idx] = 0;
+    dst.has_flipped[car_idx] = 0;
+    dst.is_flipping[car_idx] = 0;
+    dst.flip_time[car_idx] = 0.0f;
+    dst.air_time[car_idx] = 0.0f;
+    dst.air_time_since_jump[car_idx] = 0.0f;
+    dst.is_boosting[car_idx] = 0;
+    dst.boosting_time[car_idx] = 0.0f;
+    dst.time_since_boosted[car_idx] = 0.0f;
+    dst.is_auto_flipping[car_idx] = 0;
+    dst.auto_flip_timer[car_idx] = 0.0f;
+    dst.is_demoed[car_idx] = 0;
+    dst.demo_respawn_timer[car_idx] = 0.0f;
+    if (dst.ball_touched) dst.ball_touched[car_idx] = 0;
+    if (dst.ball_hit_is_valid) dst.ball_hit_is_valid[car_idx] = 0;
+}
+
+__global__ void k_set_pad_state_tensor(
+    ArenaStateSoA dst,
+    uint32_t num_envs,
+    const uint8_t* __restrict__ d_active,
+    int64_t stride_env_active,
+    int64_t stride_pad_active,
+    const float* __restrict__ d_cooldown,
+    int64_t stride_env_cd,
+    int64_t stride_pad_cd,
+    uint32_t count,
+    uint32_t start_env,
+    const int32_t* __restrict__ d_indices)
+{
+    uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= count) return;
+
+    int32_t raw_idx = d_indices ? d_indices[i] : static_cast<int32_t>(start_env + i);
+    if (raw_idx < 0 || static_cast<uint32_t>(raw_idx) >= num_envs) return;
+    uint32_t env_idx = static_cast<uint32_t>(raw_idx);
+
+    for (uint32_t p = 0; p < MAX_BOOST_PADS; ++p) {
+        uint32_t pad_linear_idx = env_idx * MAX_BOOST_PADS + p;
+        if (d_active != nullptr) {
+            dst.pad_is_active[pad_linear_idx] = d_active[i * stride_env_active + p * stride_pad_active];
+        }
+        if (d_cooldown != nullptr) {
+            dst.pad_cooldown[pad_linear_idx] = d_cooldown[i * stride_env_cd + p * stride_pad_cd];
+        }
+    }
+}
+
+__global__ void k_predict_ball_trajectory(
+    uint32_t num_envs,
+    uint32_t num_ticks,
+    uint32_t num_cols,
+    BallStateSoA ball_state,
+    const float* __restrict__ d_init_state,
+    uint32_t init_cols,
+    int64_t stride_init_env,
+    int64_t stride_init_col,
+    float* __restrict__ d_out,
+    int64_t stride_out_env,
+    int64_t stride_out_tick,
+    int64_t stride_out_col,
+    float dt,
+    MutatorConfigSoA mutator_config)
+{
+    uint32_t env_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (env_idx >= num_envs) return;
+
+    MutatorConfig mut_cfg = mutator_config.get(env_idx);
+
+    Vec3 pos, vel, ang_vel;
+    Quat quat;
+
+    if (d_init_state != nullptr) {
+        const float* init_row = d_init_state + env_idx * stride_init_env;
+        pos = Vec3(init_row[0 * stride_init_col], init_row[1 * stride_init_col], init_row[2 * stride_init_col]);
+        vel = Vec3(init_row[3 * stride_init_col], init_row[4 * stride_init_col], init_row[5 * stride_init_col]);
+        if (init_cols >= 13) {
+            quat = Quat(init_row[6 * stride_init_col], init_row[7 * stride_init_col], init_row[8 * stride_init_col], init_row[9 * stride_init_col]);
+            ang_vel = Vec3(init_row[10 * stride_init_col], init_row[11 * stride_init_col], init_row[12 * stride_init_col]);
+        } else if (init_cols >= 9) {
+            quat = Quat::identity();
+            ang_vel = Vec3(init_row[6 * stride_init_col], init_row[7 * stride_init_col], init_row[8 * stride_init_col]);
+        } else {
+            quat = Quat::identity();
+            ang_vel = Vec3(0.0f, 0.0f, 0.0f);
+        }
+    } else {
+        pos = Vec3(ball_state.pos_x[env_idx], ball_state.pos_y[env_idx], ball_state.pos_z[env_idx]);
+        vel = Vec3(ball_state.vel_x[env_idx], ball_state.vel_y[env_idx], ball_state.vel_z[env_idx]);
+        ang_vel = Vec3(ball_state.ang_vel_x[env_idx], ball_state.ang_vel_y[env_idx], ball_state.ang_vel_z[env_idx]);
+        quat = Quat(ball_state.q_w[env_idx], ball_state.q_x[env_idx], ball_state.q_y[env_idx], ball_state.q_z[env_idx]);
+    }
+
+    for (uint32_t t = 0; t < num_ticks; ++t) {
+        float* out_tick = d_out + env_idx * stride_out_env + t * stride_out_tick;
+        out_tick[0 * stride_out_col] = pos.x;
+        out_tick[1 * stride_out_col] = pos.y;
+        out_tick[2 * stride_out_col] = pos.z;
+        out_tick[3 * stride_out_col] = vel.x;
+        out_tick[4 * stride_out_col] = vel.y;
+        out_tick[5 * stride_out_col] = vel.z;
+
+        if (num_cols >= 9) {
+            if (num_cols >= 13) {
+                out_tick[6 * stride_out_col] = quat.w;
+                out_tick[7 * stride_out_col] = quat.x;
+                out_tick[8 * stride_out_col] = quat.y;
+                out_tick[9 * stride_out_col] = quat.z;
+                out_tick[10 * stride_out_col] = ang_vel.x;
+                out_tick[11 * stride_out_col] = ang_vel.y;
+                out_tick[12 * stride_out_col] = ang_vel.z;
+            } else {
+                out_tick[6 * stride_out_col] = ang_vel.x;
+                out_tick[7 * stride_out_col] = ang_vel.y;
+                out_tick[8 * stride_out_col] = ang_vel.z;
+            }
+        }
+
+        if (t + 1 < num_ticks) {
+            step_ball_state(pos, vel, ang_vel, quat, dt, mut_cfg);
+        }
+    }
+}
+
+} // namespace
+
+void SimContext::SetBallStateFromTensor(
+    const float* d_tensor,
+    uint32_t count,
+    uint32_t start_env,
+    const int32_t* d_indices,
+    uint32_t num_cols,
+    int64_t stride_env,
+    int64_t stride_col)
+{
+    if (d_tensor == nullptr) return;
+    if (count == 0) {
+        if (d_indices != nullptr) return;
+        if (start_env >= m_num_envs) return;
+        count = m_num_envs - start_env;
+    }
+    if (count == 0) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (count + threads - 1) / threads;
+    k_set_ball_state_tensor<<<blocks, threads, 0, m_stream>>>(
+        m_ball_state,
+        m_num_envs,
+        d_tensor,
+        count,
+        start_env,
+        d_indices,
+        num_cols,
+        stride_env,
+        stride_col
+    );
+}
+
+void SimContext::SetCarStateFromTensor(
+    const float* d_tensor,
+    uint32_t count,
+    uint32_t start_car,
+    const int32_t* d_indices,
+    uint32_t num_cols,
+    int64_t stride_env,
+    int64_t stride_car,
+    int64_t stride_col)
+{
+    if (d_tensor == nullptr) return;
+    if (count == 0) {
+        if (d_indices != nullptr) return;
+        if (start_car >= m_total_cars) return;
+        count = m_total_cars - start_car;
+    }
+    if (count == 0) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (count + threads - 1) / threads;
+    k_set_car_state_tensor<<<blocks, threads, 0, m_stream>>>(
+        m_car_state,
+        m_total_cars,
+        m_cars_per_env,
+        d_tensor,
+        count,
+        start_car,
+        d_indices,
+        num_cols,
+        stride_env,
+        stride_car,
+        stride_col
+    );
+}
+
+void SimContext::SetPadStateFromTensor(
+    const uint8_t* d_active,
+    int64_t stride_env_active,
+    int64_t stride_pad_active,
+    const float* d_cooldown,
+    int64_t stride_env_cd,
+    int64_t stride_pad_cd,
+    uint32_t count,
+    uint32_t start_env,
+    const int32_t* d_indices)
+{
+    if (d_active == nullptr && d_cooldown == nullptr) return;
+    if (count == 0) {
+        if (d_indices != nullptr) return;
+        if (start_env >= m_num_envs) return;
+        count = m_num_envs - start_env;
+    }
+    if (count == 0) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (count + threads - 1) / threads;
+    k_set_pad_state_tensor<<<blocks, threads, 0, m_stream>>>(
+        m_arena_state,
+        m_num_envs,
+        d_active,
+        stride_env_active,
+        stride_pad_active,
+        d_cooldown,
+        stride_env_cd,
+        stride_pad_cd,
+        count,
+        start_env,
+        d_indices
+    );
+}
+
+void SimContext::PredictBallTrajectory(
+    float* d_out,
+    uint32_t num_ticks,
+    uint32_t num_cols,
+    const float* d_init_state,
+    uint32_t init_cols,
+    int64_t stride_init_env,
+    int64_t stride_init_col,
+    int64_t stride_out_env,
+    int64_t stride_out_tick,
+    int64_t stride_out_col)
+{
+    if (d_out == nullptr || num_ticks == 0 || m_num_envs == 0) return;
+
+    if (stride_out_env == 0) stride_out_env = static_cast<int64_t>(num_ticks * num_cols);
+    if (stride_out_tick == 0) stride_out_tick = static_cast<int64_t>(num_cols);
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (m_num_envs + threads - 1) / threads;
+    k_predict_ball_trajectory<<<blocks, threads, 0, m_stream>>>(
+        m_num_envs,
+        num_ticks,
+        num_cols,
+        m_ball_state,
+        d_init_state,
+        init_cols,
+        stride_init_env,
+        stride_init_col,
+        d_out,
+        stride_out_env,
+        stride_out_tick,
+        stride_out_col,
+        DELTA_TIME,
+        m_mutator_config
+    );
 }
 
 } // namespace rocketsim_cuda

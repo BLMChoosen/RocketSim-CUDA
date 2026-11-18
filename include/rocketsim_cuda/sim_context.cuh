@@ -77,6 +77,50 @@ public:
     void CopyCarStateToDevice(const CarStatePOD* host_in, uint32_t car_start = 0, uint32_t count = 0);
     void CopyControlsToDevice(const CarControls* host_in, uint32_t car_start = 0, uint32_t count = 0);
 
+    // GPU Tensor State Setters (Zero-Copy VRAM Resets)
+    void SetBallStateFromTensor(
+        const float* d_tensor,
+        uint32_t count = 0,
+        uint32_t start_env = 0,
+        const int32_t* d_indices = nullptr,
+        uint32_t num_cols = 13,
+        int64_t stride_env = 13,
+        int64_t stride_col = 1);
+
+    void SetCarStateFromTensor(
+        const float* d_tensor,
+        uint32_t count = 0,
+        uint32_t start_car = 0,
+        const int32_t* d_indices = nullptr,
+        uint32_t num_cols = 14,
+        int64_t stride_env = 0,
+        int64_t stride_car = 14,
+        int64_t stride_col = 1);
+
+    void SetPadStateFromTensor(
+        const uint8_t* d_active = nullptr,
+        int64_t stride_env_active = MAX_BOOST_PADS,
+        int64_t stride_pad_active = 1,
+        const float* d_cooldown = nullptr,
+        int64_t stride_env_cd = MAX_BOOST_PADS,
+        int64_t stride_pad_cd = 1,
+        uint32_t count = 0,
+        uint32_t start_env = 0,
+        const int32_t* d_indices = nullptr);
+
+    // On-Demand Dedicated Ball Trajectory Prediction Kernel
+    void PredictBallTrajectory(
+        float* d_out,
+        uint32_t num_ticks,
+        uint32_t num_cols = 6,
+        const float* d_init_state = nullptr,
+        uint32_t init_cols = 0,
+        int64_t stride_init_env = 0,
+        int64_t stride_init_col = 1,
+        int64_t stride_out_env = 0,
+        int64_t stride_out_tick = 0,
+        int64_t stride_out_col = 1);
+
     // Simulation Step
     void Step(uint32_t batch_size = 0, const float* actions_tensor = nullptr);
 

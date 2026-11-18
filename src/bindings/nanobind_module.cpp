@@ -269,6 +269,243 @@ struct GpuTensorView {
     }
 };
 
+// State Setter & Prediction Tensor Unpacking Helpers
+struct TensorBufferInfo {
+    void* d_ptr = nullptr;
+    std::vector<int64_t> shape;
+    std::vector<int64_t> strides;
+    std::string dtype = "float32";
+    bool is_cuda = true;
+    bool needs_free = false;
+};
+
+inline TensorBufferInfo get_tensor_buffer(nb::object obj, cudaStream_t stream = nullptr) {
+    TensorBufferInfo info;
+    if (obj.is_none()) return info;
+
+    if (nb::isinstance<GpuTensorView>(obj)) {
+        const auto& v = nb::cast<const GpuTensorView&>(obj);
+        info.d_ptr = v.data;
+        info.shape = v.shape;
+        info.strides = v.strides;
+        info.dtype = v.dtype;
+        info.is_cuda = true;
+        return info;
+    }
+
+    if (nb::hasattr(obj, "data_ptr") && nb::hasattr(obj, "shape")) {
+        if (nb::hasattr(obj, "is_cuda")) {
+            info.is_cuda = nb::cast<bool>(obj.attr("is_cuda"));
+        } else {
+            info.is_cuda = true;
+        }
+
+        if (!info.is_cuda && nb::hasattr(obj, "is_contiguous")) {
+            if (!nb::cast<bool>(obj.attr("is_contiguous")())) {
+                obj = obj.attr("contiguous")();
+            }
+        }
+
+        uintptr_t ptr = nb::cast<uintptr_t>(obj.attr("data_ptr")());
+        info.d_ptr = reinterpret_cast<void*>(ptr);
+        nb::object sh = nb::borrow(obj.attr("shape"));
+        size_t rank = nb::len(sh);
+        for (size_t i = 0; i < rank; ++i) {
+            info.shape.push_back(nb::cast<int64_t>(sh[nb::int_(i)]));
+        }
+        if (nb::hasattr(obj, "stride")) {
+            nb::object st = nb::borrow(obj.attr("stride"));
+            if (nb::isinstance<nb::callable>(st)) {
+                nb::object s_ret = st();
+                size_t n_st = nb::len(s_ret);
+                for (size_t i = 0; i < n_st; ++i) {
+                    info.strides.push_back(nb::cast<int64_t>(s_ret[nb::int_(i)]));
+                }
+            } else if (nb::isinstance<nb::tuple>(st)) {
+                size_t n_st = nb::len(st);
+                for (size_t i = 0; i < n_st; ++i) {
+                    info.strides.push_back(nb::cast<int64_t>(st[nb::int_(i)]));
+                }
+            }
+        }
+        if (info.strides.empty()) {
+            int64_t cur = 1;
+            info.strides.resize(info.shape.size());
+            for (int i = static_cast<int>(info.shape.size()) - 1; i >= 0; --i) {
+                info.strides[i] = cur;
+                cur *= info.shape[i];
+            }
+        }
+        if (nb::hasattr(obj, "dtype")) {
+            std::string dt_str = nb::cast<std::string>(obj.attr("dtype").attr("__str__")());
+            if (dt_str.find("uint8") != std::string::npos || dt_str.find("bool") != std::string::npos || dt_str.find("byte") != std::string::npos) {
+                info.dtype = "uint8";
+            } else if (dt_str.find("int32") != std::string::npos) {
+                info.dtype = "int32";
+            } else if (dt_str.find("int64") != std::string::npos || dt_str.find("long") != std::string::npos) {
+                info.dtype = "int64";
+            } else {
+                info.dtype = "float32";
+            }
+        }
+
+        if (!info.is_cuda) {
+            size_t elem_size = (info.dtype == "uint8") ? 1 : ((info.dtype == "int64") ? 8 : 4);
+            int64_t total = 1;
+            for (auto s : info.shape) total *= s;
+            size_t total_bytes = total * elem_size;
+            void* d_tmp = nullptr;
+            cudaMalloc(&d_tmp, total_bytes);
+            cudaMemcpyAsync(d_tmp, info.d_ptr, total_bytes, cudaMemcpyHostToDevice, stream);
+            info.d_ptr = d_tmp;
+            info.is_cuda = true;
+            info.needs_free = true;
+        }
+        return info;
+    }
+
+    if (nb::isinstance<nb::list>(obj)) {
+        nb::list outer = nb::cast<nb::list>(obj);
+        if (outer.size() > 0) {
+            if (nb::isinstance<nb::list>(outer[0])) {
+                int64_t rows = outer.size();
+                nb::list r0 = nb::cast<nb::list>(outer[0]);
+                int64_t cols = r0.size();
+                std::vector<float> h_buf(rows * cols);
+                for (int64_t r = 0; r < rows; ++r) {
+                    nb::list row_list = nb::cast<nb::list>(outer[r]);
+                    for (int64_t c = 0; c < cols; ++c) {
+                        h_buf[r * cols + c] = nb::cast<float>(row_list[c]);
+                    }
+                }
+                void* d_tmp = nullptr;
+                cudaMalloc(&d_tmp, rows * cols * sizeof(float));
+                cudaMemcpyAsync(d_tmp, h_buf.data(), rows * cols * sizeof(float), cudaMemcpyHostToDevice, stream);
+                info.d_ptr = d_tmp;
+                info.shape = { rows, cols };
+                info.strides = { cols, 1 };
+                info.dtype = "float32";
+                info.is_cuda = true;
+                info.needs_free = true;
+                return info;
+            } else {
+                int64_t cols = outer.size();
+                std::vector<float> h_buf(cols);
+                for (int64_t c = 0; c < cols; ++c) {
+                    h_buf[c] = nb::cast<float>(outer[c]);
+                }
+                void* d_tmp = nullptr;
+                cudaMalloc(&d_tmp, cols * sizeof(float));
+                cudaMemcpyAsync(d_tmp, h_buf.data(), cols * sizeof(float), cudaMemcpyHostToDevice, stream);
+                info.d_ptr = d_tmp;
+                info.shape = { cols };
+                info.strides = { 1 };
+                info.dtype = "float32";
+                info.is_cuda = true;
+                info.needs_free = true;
+                return info;
+            }
+        }
+    }
+
+    return info;
+}
+
+inline void release_tensor_buffer(TensorBufferInfo& info) {
+    if (info.needs_free && info.d_ptr) {
+        cudaFree(info.d_ptr);
+        info.d_ptr = nullptr;
+        info.needs_free = false;
+    }
+}
+
+struct IndicesBufferInfo {
+    const int32_t* d_indices = nullptr;
+    uint32_t count = 0;
+    bool is_provided = false;
+    bool needs_free = false;
+};
+
+inline IndicesBufferInfo get_indices_buffer(nb::object indices_obj, cudaStream_t stream = nullptr) {
+    IndicesBufferInfo res;
+    if (indices_obj.is_none()) return res;
+    res.is_provided = true;
+
+    if (nb::isinstance<GpuTensorView>(indices_obj)) {
+        const auto& v = nb::cast<const GpuTensorView&>(indices_obj);
+        res.count = static_cast<uint32_t>(v.shape[0]);
+        if (res.count > 0) {
+            res.d_indices = reinterpret_cast<const int32_t*>(v.data);
+        }
+        return res;
+    }
+
+    if (nb::hasattr(indices_obj, "data_ptr") && nb::hasattr(indices_obj, "shape")) {
+        bool is_cuda = nb::hasattr(indices_obj, "is_cuda") ? nb::cast<bool>(indices_obj.attr("is_cuda")) : true;
+        if (!is_cuda && nb::hasattr(indices_obj, "is_contiguous")) {
+            if (!nb::cast<bool>(indices_obj.attr("is_contiguous")())) {
+                indices_obj = indices_obj.attr("contiguous")();
+            }
+        }
+        uintptr_t ptr = nb::cast<uintptr_t>(indices_obj.attr("data_ptr")());
+        res.count = static_cast<uint32_t>(nb::len(indices_obj));
+        if (res.count == 0) return res;
+        std::string dt_str = nb::hasattr(indices_obj, "dtype") ? nb::cast<std::string>(indices_obj.attr("dtype").attr("__str__")()) : "";
+        bool is_int64 = (dt_str.find("int64") != std::string::npos || dt_str.find("long") != std::string::npos);
+
+        if (is_cuda && !is_int64) {
+            res.d_indices = reinterpret_cast<const int32_t*>(ptr);
+            return res;
+        }
+
+        std::vector<int32_t> h_idx(res.count);
+        if (!is_cuda) {
+            if (is_int64) {
+                const int64_t* src = reinterpret_cast<const int64_t*>(ptr);
+                for (size_t i = 0; i < res.count; ++i) h_idx[i] = static_cast<int32_t>(src[i]);
+            } else {
+                const int32_t* src = reinterpret_cast<const int32_t*>(ptr);
+                for (size_t i = 0; i < res.count; ++i) h_idx[i] = src[i];
+            }
+        } else {
+            std::vector<int64_t> tmp64(res.count);
+            cudaMemcpy(tmp64.data(), reinterpret_cast<const void*>(ptr), res.count * sizeof(int64_t), cudaMemcpyDeviceToHost);
+            for (size_t i = 0; i < res.count; ++i) h_idx[i] = static_cast<int32_t>(tmp64[i]);
+        }
+        int32_t* d_mem = nullptr;
+        cudaMalloc(&d_mem, res.count * sizeof(int32_t));
+        cudaMemcpyAsync(d_mem, h_idx.data(), res.count * sizeof(int32_t), cudaMemcpyHostToDevice, stream);
+        res.d_indices = d_mem;
+        res.needs_free = true;
+        return res;
+    }
+
+    if (nb::isinstance<nb::list>(indices_obj)) {
+        nb::list l = nb::cast<nb::list>(indices_obj);
+        res.count = static_cast<uint32_t>(l.size());
+        if (res.count > 0) {
+            std::vector<int32_t> h_idx(res.count);
+            for (uint32_t i = 0; i < res.count; ++i) h_idx[i] = nb::cast<int32_t>(l[i]);
+            int32_t* d_mem = nullptr;
+            cudaMalloc(&d_mem, res.count * sizeof(int32_t));
+            cudaMemcpyAsync(d_mem, h_idx.data(), res.count * sizeof(int32_t), cudaMemcpyHostToDevice, stream);
+            res.d_indices = d_mem;
+            res.needs_free = true;
+        }
+        return res;
+    }
+
+    return res;
+}
+
+inline void release_indices_buffer(IndicesBufferInfo& info) {
+    if (info.needs_free && info.d_indices) {
+        cudaFree(const_cast<int32_t*>(info.d_indices));
+        info.d_indices = nullptr;
+        info.needs_free = false;
+    }
+}
+
 NB_MODULE(rocketsim_cuda, m) {
     m.doc() = "RocketSim-CUDA: Ultra-parallel GPU physics simulation engine with zero-copy PyTorch/DLPack tensors";
 
@@ -801,7 +1038,364 @@ NB_MODULE(rocketsim_cuda, m) {
                 d_mask = arr.data();
             }
             ctx.ResetEnvironmentsMasked(d_mask);
-        }, nb::arg("mask"), "Reset environments using a GPU boolean/uint8 mask");
+        }, nb::arg("mask"), "Reset environments using a GPU boolean/uint8 mask")
+
+        // State Setters (Batch zero-copy GPU tensor resets)
+        .def("set_ball_state", [](SimContext& ctx, nb::object state, uint32_t env_start, nb::object indices) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) {
+                throw std::invalid_argument("set_ball_state: invalid tensor object");
+            }
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+
+            uint32_t count = 0;
+            uint32_t num_cols = 13;
+            int64_t stride_env = 13;
+            int64_t stride_col = 1;
+
+            if (buf.shape.size() == 1) {
+                count = 1;
+                num_cols = static_cast<uint32_t>(buf.shape[0]);
+                stride_env = 0;
+                stride_col = buf.strides.empty() ? 1 : buf.strides[0];
+            } else if (buf.shape.size() >= 2) {
+                count = static_cast<uint32_t>(buf.shape[0]);
+                num_cols = static_cast<uint32_t>(buf.shape[1]);
+                stride_env = buf.strides.empty() ? num_cols : buf.strides[0];
+                stride_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            }
+
+            if (idx_buf.is_provided) {
+                count = idx_buf.count;
+            }
+
+            if (count > 0) {
+                ctx.SetBallStateFromTensor(
+                    static_cast<const float*>(buf.d_ptr),
+                    count,
+                    env_start,
+                    idx_buf.d_indices,
+                    num_cols,
+                    stride_env,
+                    stride_col
+                );
+            }
+
+            if (buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf);
+            release_indices_buffer(idx_buf);
+        }, nb::arg("state"), nb::arg("env_start") = 0, nb::arg("indices") = nb::none(),
+        "Set ball states in batch on GPU directly in VRAM with zero host copies")
+        .def("set_ball_states", [](SimContext& ctx, nb::object state, uint32_t env_start, nb::object indices) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) throw std::invalid_argument("set_ball_states: invalid tensor object");
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+            uint32_t count = 0, num_cols = 13;
+            int64_t stride_env = 13, stride_col = 1;
+            if (buf.shape.size() == 1) {
+                count = 1; num_cols = static_cast<uint32_t>(buf.shape[0]); stride_env = 0; stride_col = buf.strides.empty() ? 1 : buf.strides[0];
+            } else if (buf.shape.size() >= 2) {
+                count = static_cast<uint32_t>(buf.shape[0]); num_cols = static_cast<uint32_t>(buf.shape[1]);
+                stride_env = buf.strides.empty() ? num_cols : buf.strides[0]; stride_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            }
+            if (idx_buf.is_provided) count = idx_buf.count;
+            if (count > 0) {
+                ctx.SetBallStateFromTensor(static_cast<const float*>(buf.d_ptr), count, env_start, idx_buf.d_indices, num_cols, stride_env, stride_col);
+            }
+            if (buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf); release_indices_buffer(idx_buf);
+        }, nb::arg("state"), nb::arg("env_start") = 0, nb::arg("indices") = nb::none(),
+        "Alias for set_ball_state")
+
+        .def("set_car_state", [](SimContext& ctx, nb::object state, uint32_t car_start, nb::object indices) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) {
+                throw std::invalid_argument("set_car_state: invalid tensor object");
+            }
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+
+            uint32_t count = 0;
+            uint32_t num_cols = 14;
+            int64_t stride_env = 0;
+            int64_t stride_car = 14;
+            int64_t stride_col = 1;
+
+            if (buf.shape.size() == 1) {
+                count = 1;
+                num_cols = static_cast<uint32_t>(buf.shape[0]);
+                stride_car = 0;
+                stride_col = buf.strides.empty() ? 1 : buf.strides[0];
+            } else if (buf.shape.size() == 2) {
+                count = static_cast<uint32_t>(buf.shape[0]);
+                num_cols = static_cast<uint32_t>(buf.shape[1]);
+                stride_car = buf.strides.empty() ? num_cols : buf.strides[0];
+                stride_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            } else if (buf.shape.size() == 3) {
+                int64_t e = buf.shape[0];
+                int64_t c = buf.shape[1];
+                count = static_cast<uint32_t>(e * c);
+                num_cols = static_cast<uint32_t>(buf.shape[2]);
+                stride_env = buf.strides.empty() ? (c * num_cols) : buf.strides[0];
+                stride_car = buf.strides.size() > 1 ? buf.strides[1] : num_cols;
+                stride_col = buf.strides.size() > 2 ? buf.strides[2] : 1;
+            }
+
+            if (idx_buf.is_provided) {
+                count = idx_buf.count;
+            }
+
+            if (count > 0) {
+                ctx.SetCarStateFromTensor(
+                    static_cast<const float*>(buf.d_ptr),
+                    count,
+                    car_start,
+                    idx_buf.d_indices,
+                    num_cols,
+                    stride_env,
+                    stride_car,
+                    stride_col
+                );
+            }
+
+            if (buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf);
+            release_indices_buffer(idx_buf);
+        }, nb::arg("state"), nb::arg("car_start") = 0, nb::arg("indices") = nb::none(),
+        "Set car states in batch on GPU directly in VRAM with zero host copies")
+        .def("set_car_states", [](SimContext& ctx, nb::object state, uint32_t car_start, nb::object indices) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) throw std::invalid_argument("set_car_states: invalid tensor object");
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+            uint32_t count = 0, num_cols = 14;
+            int64_t stride_env = 0, stride_car = 14, stride_col = 1;
+            if (buf.shape.size() == 1) {
+                count = 1; num_cols = static_cast<uint32_t>(buf.shape[0]); stride_car = 0; stride_col = buf.strides.empty() ? 1 : buf.strides[0];
+            } else if (buf.shape.size() == 2) {
+                count = static_cast<uint32_t>(buf.shape[0]); num_cols = static_cast<uint32_t>(buf.shape[1]);
+                stride_car = buf.strides.empty() ? num_cols : buf.strides[0]; stride_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            } else if (buf.shape.size() == 3) {
+                count = static_cast<uint32_t>(buf.shape[0] * buf.shape[1]); num_cols = static_cast<uint32_t>(buf.shape[2]);
+                stride_env = buf.strides.empty() ? (buf.shape[1] * num_cols) : buf.strides[0];
+                stride_car = buf.strides.size() > 1 ? buf.strides[1] : num_cols;
+                stride_col = buf.strides.size() > 2 ? buf.strides[2] : 1;
+            }
+            if (idx_buf.is_provided) count = idx_buf.count;
+            if (count > 0) {
+                ctx.SetCarStateFromTensor(static_cast<const float*>(buf.d_ptr), count, car_start, idx_buf.d_indices, num_cols, stride_env, stride_car, stride_col);
+            }
+            if (buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf); release_indices_buffer(idx_buf);
+        }, nb::arg("state"), nb::arg("car_start") = 0, nb::arg("indices") = nb::none(),
+        "Alias for set_car_state")
+
+        .def("set_pad_state", [](SimContext& ctx, nb::object pad_is_active, nb::object pad_cooldown, uint32_t env_start, nb::object indices) {
+            TensorBufferInfo active_buf;
+            if (!pad_is_active.is_none()) active_buf = get_tensor_buffer(pad_is_active, ctx.GetStream());
+
+            TensorBufferInfo cd_buf;
+            if (!pad_cooldown.is_none()) cd_buf = get_tensor_buffer(pad_cooldown, ctx.GetStream());
+
+            if (active_buf.d_ptr == nullptr && cd_buf.d_ptr == nullptr) {
+                throw std::invalid_argument("set_pad_state: both pad_is_active and pad_cooldown cannot be None");
+            }
+
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+
+            uint32_t count = 0;
+            if (active_buf.d_ptr) {
+                count = active_buf.shape.size() > 1 ? static_cast<uint32_t>(active_buf.shape[0]) : 1;
+            } else if (cd_buf.d_ptr) {
+                count = cd_buf.shape.size() > 1 ? static_cast<uint32_t>(cd_buf.shape[0]) : 1;
+            }
+            if (idx_buf.is_provided) {
+                count = idx_buf.count;
+            }
+
+            int64_t stride_env_act = active_buf.strides.empty() ? MAX_BOOST_PADS : active_buf.strides[0];
+            int64_t stride_pad_act = active_buf.strides.size() > 1 ? active_buf.strides[1] : 1;
+
+            int64_t stride_env_cd = cd_buf.strides.empty() ? MAX_BOOST_PADS : cd_buf.strides[0];
+            int64_t stride_pad_cd = cd_buf.strides.size() > 1 ? cd_buf.strides[1] : 1;
+
+            if (count > 0) {
+                ctx.SetPadStateFromTensor(
+                    static_cast<const uint8_t*>(active_buf.d_ptr),
+                    stride_env_act,
+                    stride_pad_act,
+                    static_cast<const float*>(cd_buf.d_ptr),
+                    stride_env_cd,
+                    stride_pad_cd,
+                    count,
+                    env_start,
+                    idx_buf.d_indices
+                );
+            }
+
+            if (active_buf.needs_free || cd_buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(active_buf);
+            release_tensor_buffer(cd_buf);
+            release_indices_buffer(idx_buf);
+        }, nb::arg("pad_is_active") = nb::none(), nb::arg("pad_cooldown") = nb::none(), nb::arg("env_start") = 0, nb::arg("indices") = nb::none(),
+        "Set boost pad states in batch on GPU directly in VRAM with zero host copies")
+        .def("set_pad_states", [](SimContext& ctx, nb::object pad_is_active, nb::object pad_cooldown, uint32_t env_start, nb::object indices) {
+            TensorBufferInfo active_buf;
+            if (!pad_is_active.is_none()) active_buf = get_tensor_buffer(pad_is_active, ctx.GetStream());
+            TensorBufferInfo cd_buf;
+            if (!pad_cooldown.is_none()) cd_buf = get_tensor_buffer(pad_cooldown, ctx.GetStream());
+            if (active_buf.d_ptr == nullptr && cd_buf.d_ptr == nullptr) throw std::invalid_argument("set_pad_states: both None");
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+            uint32_t count = active_buf.d_ptr ? (active_buf.shape.size() > 1 ? static_cast<uint32_t>(active_buf.shape[0]) : 1) :
+                                                (cd_buf.shape.size() > 1 ? static_cast<uint32_t>(cd_buf.shape[0]) : 1);
+            if (idx_buf.is_provided) count = idx_buf.count;
+            int64_t stride_env_act = active_buf.strides.empty() ? MAX_BOOST_PADS : active_buf.strides[0];
+            int64_t stride_pad_act = active_buf.strides.size() > 1 ? active_buf.strides[1] : 1;
+            int64_t stride_env_cd = cd_buf.strides.empty() ? MAX_BOOST_PADS : cd_buf.strides[0];
+            int64_t stride_pad_cd = cd_buf.strides.size() > 1 ? cd_buf.strides[1] : 1;
+            if (count > 0) {
+                ctx.SetPadStateFromTensor(static_cast<const uint8_t*>(active_buf.d_ptr), stride_env_act, stride_pad_act,
+                                          static_cast<const float*>(cd_buf.d_ptr), stride_env_cd, stride_pad_cd, count, env_start, idx_buf.d_indices);
+            }
+            if (active_buf.needs_free || cd_buf.needs_free || idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(active_buf); release_tensor_buffer(cd_buf); release_indices_buffer(idx_buf);
+        }, nb::arg("pad_is_active") = nb::none(), nb::arg("pad_cooldown") = nb::none(), nb::arg("env_start") = 0, nb::arg("indices") = nb::none(),
+        "Alias for set_pad_state")
+
+        .def("predict_ball_trajectory", [](SimContext& ctx, uint32_t num_ticks, nb::object initial_state, nb::object out_tensor) -> nb::object {
+            if (num_ticks == 0) num_ticks = 120;
+
+            const float* d_init = nullptr;
+            uint32_t init_cols = 0;
+            int64_t stride_init_env = 0;
+            int64_t stride_init_col = 1;
+            TensorBufferInfo init_buf;
+            if (!initial_state.is_none()) {
+                init_buf = get_tensor_buffer(initial_state, ctx.GetStream());
+                if (init_buf.d_ptr) {
+                    d_init = static_cast<const float*>(init_buf.d_ptr);
+                    init_cols = init_buf.shape.empty() ? 6 : static_cast<uint32_t>(init_buf.shape.back());
+                    stride_init_env = init_buf.strides.empty() ? init_cols : init_buf.strides[0];
+                    stride_init_col = init_buf.strides.size() > 1 ? init_buf.strides[1] : 1;
+                }
+            }
+
+            float* d_out = nullptr;
+            uint32_t num_cols = 6;
+            int64_t stride_out_env = 0;
+            int64_t stride_out_tick = 0;
+            int64_t stride_out_col = 1;
+            nb::object ret_obj;
+
+            if (!out_tensor.is_none()) {
+                auto out_buf = get_tensor_buffer(out_tensor, ctx.GetStream());
+                if (!out_buf.is_cuda || out_buf.d_ptr == nullptr) {
+                    throw std::invalid_argument("predict_ball_trajectory: out_tensor must reside on GPU (is_cuda=True)");
+                }
+                d_out = static_cast<float*>(out_buf.d_ptr);
+                num_cols = out_buf.shape.empty() ? 6 : static_cast<uint32_t>(out_buf.shape.back());
+                stride_out_env = out_buf.strides.empty() ? static_cast<int64_t>(num_ticks * num_cols) : out_buf.strides[0];
+                stride_out_tick = out_buf.strides.size() > 1 ? out_buf.strides[1] : static_cast<int64_t>(num_cols);
+                stride_out_col = out_buf.strides.size() > 2 ? out_buf.strides[2] : 1;
+                ret_obj = out_tensor;
+            } else {
+                int64_t n_envs = ctx.GetNumEnvs();
+                int64_t n_ticks = num_ticks;
+                int64_t cols = 6;
+                size_t total_bytes = n_envs * n_ticks * cols * sizeof(float);
+
+                void* d_new = nullptr;
+                cudaMalloc(&d_new, total_bytes);
+                d_out = static_cast<float*>(d_new);
+
+                stride_out_env = n_ticks * cols;
+                stride_out_tick = cols;
+                stride_out_col = 1;
+
+                GpuTensorView v;
+                v.data = d_new;
+                v.shape = { n_envs, n_ticks, cols };
+                v.strides = { n_ticks * cols, cols, 1 };
+                v.dtype = "float32";
+                v.device_type = 2;
+                v.device_id = 0;
+                nb::capsule cleanup(d_new, [](void* p) noexcept {
+                    if (p) cudaFree(p);
+                });
+                v.owner = cleanup;
+                ret_obj = nb::cast(v);
+                num_cols = 6;
+            }
+
+            ctx.PredictBallTrajectory(
+                d_out,
+                num_ticks,
+                num_cols,
+                d_init,
+                init_cols,
+                stride_init_env,
+                stride_init_col,
+                stride_out_env,
+                stride_out_tick,
+                stride_out_col
+            );
+
+            if (init_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+                release_tensor_buffer(init_buf);
+            }
+
+            return ret_obj;
+        }, nb::arg("num_ticks") = 120, nb::arg("initial_state") = nb::none(), nb::arg("out_tensor") = nb::none(),
+        "On-demand dedicated CUDA kernel for ball trajectory prediction over N future ticks")
+
+        // C++ Interop / Staging Setters
+        .def("copy_ball_state_to_device", [](SimContext& ctx, nb::object state, uint32_t env_start) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) throw std::invalid_argument("copy_ball_state_to_device: invalid tensor");
+            uint32_t count = buf.shape.size() > 1 ? static_cast<uint32_t>(buf.shape[0]) : 1;
+            uint32_t num_cols = buf.shape.size() > 1 ? static_cast<uint32_t>(buf.shape[1]) : static_cast<uint32_t>(buf.shape[0]);
+            int64_t st_env = buf.strides.empty() ? num_cols : buf.strides[0];
+            int64_t st_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            ctx.SetBallStateFromTensor(static_cast<const float*>(buf.d_ptr), count, env_start, nullptr, num_cols, st_env, st_col);
+            if (buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf);
+        }, nb::arg("state"), nb::arg("env_start") = 0, "Copy ball states to device")
+
+        .def("copy_car_state_to_device", [](SimContext& ctx, nb::object state, uint32_t car_start) {
+            auto buf = get_tensor_buffer(state, ctx.GetStream());
+            if (buf.d_ptr == nullptr) throw std::invalid_argument("copy_car_state_to_device: invalid tensor");
+            uint32_t count = 0, num_cols = 14;
+            int64_t st_env = 0, st_car = 14, st_col = 1;
+            if (buf.shape.size() == 1) {
+                count = 1; num_cols = static_cast<uint32_t>(buf.shape[0]); st_car = 0; st_col = buf.strides.empty() ? 1 : buf.strides[0];
+            } else if (buf.shape.size() == 2) {
+                count = static_cast<uint32_t>(buf.shape[0]); num_cols = static_cast<uint32_t>(buf.shape[1]);
+                st_car = buf.strides.empty() ? num_cols : buf.strides[0]; st_col = buf.strides.size() > 1 ? buf.strides[1] : 1;
+            } else if (buf.shape.size() == 3) {
+                count = static_cast<uint32_t>(buf.shape[0] * buf.shape[1]); num_cols = static_cast<uint32_t>(buf.shape[2]);
+                st_env = buf.strides.empty() ? (buf.shape[1] * num_cols) : buf.strides[0];
+                st_car = buf.strides.size() > 1 ? buf.strides[1] : num_cols;
+                st_col = buf.strides.size() > 2 ? buf.strides[2] : 1;
+            }
+            ctx.SetCarStateFromTensor(static_cast<const float*>(buf.d_ptr), count, car_start, nullptr, num_cols, st_env, st_car, st_col);
+            if (buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_tensor_buffer(buf);
+        }, nb::arg("state"), nb::arg("car_start") = 0, "Copy car states to device");
 
     // Asynchronous CUDA Events (for non-blocking latency/throughput benchmarking)
     nb::class_<GpuEvent>(m, "GpuEvent")

@@ -320,6 +320,66 @@ class RocketSimBatchedEnv:
         self.sim.reset_masked(mask)
         return self.get_car_observations()
 
+    def set_ball_state(self, state: Any, env_start: int = 0, indices: Optional[Any] = None):
+        """
+        Set ball state on GPU directly in VRAM without host copies.
+
+        Args:
+            state: GPU tensor (torch.Tensor or GpuTensorView) or list with shape [N, D] (D in {3, 6, 9, 13}).
+            env_start: starting environment index.
+            indices: optional environment index tensor or list.
+        """
+        self.sim.set_ball_state(state, env_start, indices)
+
+    def set_car_state(self, state: Any, car_start: int = 0, indices: Optional[Any] = None):
+        """
+        Set car state on GPU directly in VRAM without host copies.
+
+        Args:
+            state: GPU tensor with shape [total_cars, D] or [num_envs, cars_per_env, D] (D in {6, 9, 13, 14}).
+            car_start: starting car index.
+            indices: optional car index tensor or list.
+        """
+        self.sim.set_car_state(state, car_start, indices)
+
+    def set_pad_state(
+        self,
+        pad_is_active: Optional[Any] = None,
+        pad_cooldown: Optional[Any] = None,
+        env_start: int = 0,
+        indices: Optional[Any] = None,
+    ):
+        """
+        Set boost pad states on GPU directly in VRAM without host copies.
+
+        Args:
+            pad_is_active: optional uint8 tensor of shape [num_envs, 34].
+            pad_cooldown: optional float32 tensor of shape [num_envs, 34].
+            env_start: starting environment index.
+            indices: optional environment index tensor or list.
+        """
+        self.sim.set_pad_state(pad_is_active, pad_cooldown, env_start, indices)
+
+    def predict_ball_trajectory(
+        self,
+        num_ticks: int = 120,
+        initial_ball_state: Optional[Any] = None,
+        out_tensor: Optional[Any] = None,
+    ) -> Any:
+        """
+        Predict future ball trajectory for N ticks on GPU on-demand.
+
+        Args:
+            num_ticks: number of future simulation ticks to predict (default: 120).
+            initial_ball_state: optional starting ball state tensor [num_envs, D].
+            out_tensor: optional output GPU tensor [num_envs, num_ticks, 6] in VRAM.
+
+        Returns:
+            GPU tensor of shape [num_envs, num_ticks, 6] on cuda:0 (pos.xyz, vel.xyz).
+        """
+        out = self.sim.predict_ball_trajectory(num_ticks, initial_ball_state, out_tensor)
+        return self._wrap(out)
+
     def close(self):
         """Release simulator resources."""
         self._car_obs_view = None
@@ -344,7 +404,69 @@ class RocketSimBatchedEnv:
         self.sim = None
 
 
+class BallPredTracker:
+    """
+    On-demand GPU Ball Trajectory Predictor for RocketSim-CUDA.
+    Executes dedicated analytical SDF collision physics on GPU without host roundtrips.
+    """
+
+    def __init__(
+        self,
+        sim_or_env: Any = None,
+        num_pred_ticks: int = 120,
+        env: Any = None,
+        num_ticks: Optional[int] = None
+    ):
+        target = env if env is not None else sim_or_env
+        if target is None:
+            raise ValueError("Must provide a SimContext or RocketSimBatchedEnv to BallPredTracker")
+        if hasattr(target, "sim"):
+            self.sim = target.sim
+            self.env = target
+        else:
+            self.sim = target
+            self.env = None
+        self.num_pred_ticks = int(num_ticks if num_ticks is not None else num_pred_ticks)
+        self._pred_tensor = None
+
+    def update(self, initial_ball_state: Optional[Any] = None) -> Any:
+        if self._pred_tensor is None:
+            out = self.sim.predict_ball_trajectory(self.num_pred_ticks, initial_ball_state)
+            if self.env is not None and hasattr(self.env, "_wrap"):
+                self._pred_tensor = self.env._wrap(out)
+            else:
+                self._pred_tensor = out
+        else:
+            self.sim.predict_ball_trajectory(self.num_pred_ticks, initial_ball_state, self._pred_tensor)
+        return self._pred_tensor
+
+    def predict(self, initial_ball_state: Optional[Any] = None, num_ticks: Optional[int] = None) -> Any:
+        """Alias for update, optionally allowing overriding num_ticks."""
+        if num_ticks is not None and num_ticks != self.num_pred_ticks:
+            out = self.sim.predict_ball_trajectory(int(num_ticks), initial_ball_state)
+            if self.env is not None and hasattr(self.env, "_wrap"):
+                return self.env._wrap(out)
+            return out
+        return self.update(initial_ball_state)
+
+    def get_trajectory(self) -> Any:
+        if self._pred_tensor is None:
+            return self.update()
+        return self._pred_tensor
+
+    def get_ball_state_for_time(self, pred_time: float, env_idx: int = 0) -> Any:
+        """
+        Get predicted ball state at future time delta (in seconds).
+        Matches C++ BallPredTracker::GetBallStateForTime.
+        """
+        traj = self.get_trajectory()
+        tick = int(round(pred_time / (1.0 / 120.0)))
+        tick = max(0, min(tick, self.num_pred_ticks - 1))
+        return traj[env_idx, tick]
+
+
 # Expose in rocketsim_cuda module per orchestrator requirement
 rocketsim_cuda.RocketSimBatchedEnv = RocketSimBatchedEnv
+rocketsim_cuda.BallPredTracker = BallPredTracker
 rocketsim_cuda.gym_env = sys.modules[__name__]
 

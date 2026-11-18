@@ -8,6 +8,7 @@
 #include "rocketsim_cuda/physics/car_contact.cuh"
 #include "rocketsim_cuda/types/car_config.cuh"
 #include "rocketsim_cuda/types/arena_config.cuh"
+#include "rocketsim_cuda/physics/ball_dynamics.cuh"
 
 namespace rocketsim_cuda {
 
@@ -22,32 +23,7 @@ __device__ void StepBallDevice(
     Vec3 ang_vel(ball_state.ang_vel_x[env_idx], ball_state.ang_vel_y[env_idx], ball_state.ang_vel_z[env_idx]);
     Quat quat(ball_state.q_w[env_idx], ball_state.q_x[env_idx], ball_state.q_y[env_idx], ball_state.q_z[env_idx]);
 
-    // Check if sleeping (zero velocity on ground)
-    // Matches RocketSim Arena.cpp:695 where zero-vel ball sleeps at BALL_REST_Z (93.15 UU)
-    if (vel.length_sq() == 0.0f && ang_vel.length_sq() == 0.0f && pos.z <= BALL_REST_Z + 0.1f) {
-        return;
-    }
-
-    // 1. Damping
-    apply_rigid_body_damping(vel, ang_vel, mut_cfg.ball_drag, 0.0f, dt);
-
-    // 2. Gravity
-    vel = vel + mut_cfg.gravity * dt;
-
-    // 3. Arena / Ground collision resolution (updates velocities and pushes out penetration)
-    resolve_ball_arena_collision(pos, vel, ang_vel, mut_cfg.ball_radius, mut_cfg.ball_world_restitution, mut_cfg.ball_world_friction, mut_cfg.gravity.z, dt);
-
-    // 4. Linear pos integration with post-collision velocity (in Bullet units for exact rounding parity)
-    pos = (pos * 0.02f + vel * (0.02f * dt)) * 50.0f;
-
-    // 5. Rotation integration with post-collision angular velocity
-    quat = bullet_integrate_quaternion(quat, ang_vel, dt);
-
-    // Velocity Clamping
-    float b_speed = vel.length();
-    if (b_speed > mut_cfg.ball_max_speed) {
-        vel = vel * (mut_cfg.ball_max_speed / b_speed);
-    }
+    step_ball_state(pos, vel, ang_vel, quat, dt, mut_cfg);
 
     // Write back coalesced
     ball_state.pos_x[env_idx] = pos.x;
@@ -382,8 +358,8 @@ __global__ void StepSimulationKernel(
     MutatorConfig mut_cfg = mutator_config.get(env_idx);
     ArenaConfig arena_cfg = arena_config.get(env_idx);
 
-    // Multi-body kinematics snapshot for this environment (up to 6 cars)
-    constexpr uint32_t MAX_ENV_CARS = 6;
+    // Multi-body kinematics snapshot for this environment (up to 8 cars for 4v4 support)
+    constexpr uint32_t MAX_ENV_CARS = 8;
     Vec3 cars_pos[MAX_ENV_CARS];
     Mat3 cars_basis[MAX_ENV_CARS];
     Vec3 cars_vel_bt[MAX_ENV_CARS];
