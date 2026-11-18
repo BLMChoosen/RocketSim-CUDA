@@ -273,4 +273,75 @@ __device__ __forceinline__ bool raycast_arena_sdf(
     return false;
 }
 
+/**
+ * @brief Extrapolates ball trajectory to estimate if it will enter the goal within max_time.
+ * Strictly matches RocketSim CPU Arena::IsBallProbablyGoingIn.
+ *
+ * @param ball_pos Current ball position in Unreal Units (UU)
+ * @param ball_vel Current ball velocity in UU/s
+ * @param max_time Maximum time in seconds to predict ahead (default 2.0s)
+ * @param extra_margin Additional margin added to goal dimensions (default 0.0)
+ * @param goal_team_out Optional output pointer for the defending team (0 = BLUE net, 1 = ORANGE net)
+ * @param goal_base_threshold_y Goal Y threshold (default SOCCAR_GOAL_SCORE_BASE_THRESHOLD_Y = 5124.25f)
+ * @param ball_radius Ball radius in UU (default BALL_RADIUS = 91.25f)
+ * @param gravity Gravity vector in UU/s^2 (default (0, 0, -650))
+ * @return true if the extrapolated ball position falls within the goal volume
+ */
+__device__ __host__ __forceinline__ bool is_ball_probably_going_in(
+    const Vec3& ball_pos,
+    const Vec3& ball_vel,
+    float max_time = 2.0f,
+    float extra_margin = 0.0f,
+    int32_t* goal_team_out = nullptr,
+    float goal_base_threshold_y = SOCCAR_GOAL_SCORE_BASE_THRESHOLD_Y,
+    float ball_radius = BALL_RADIUS,
+    const Vec3& gravity = Vec3(0.0f, 0.0f, GRAVITY_Z))
+{
+    if (fabsf(ball_vel.y) < 1e-7f) {
+        return false;
+    }
+
+    float score_dir_sgn = (ball_vel.y > 0.0f) ? 1.0f : -1.0f;
+    float goal_y = goal_base_threshold_y * score_dir_sgn;
+    float dist_to_goal = fabsf(ball_pos.y - goal_y);
+
+    float time_to_goal = dist_to_goal / fabsf(ball_vel.y);
+    if (time_to_goal > max_time) {
+        return false;
+    }
+
+    Vec3 extrap_pos = ball_pos + (ball_vel * time_to_goal) + (gravity * (time_to_goal * time_to_goal * 0.5f));
+
+    // RLBot / RocketSim standard Soccar goal dimensions
+    constexpr float APPROX_GOAL_HALF_WIDTH = 892.755f;
+    constexpr float APPROX_GOAL_HEIGHT = 642.775f;
+
+    float score_margin = ball_radius * 0.1f + extra_margin;
+
+    if (extrap_pos.z > APPROX_GOAL_HEIGHT + score_margin) {
+        return false; // Too high
+    }
+
+    if (fabsf(extrap_pos.x) > APPROX_GOAL_HALF_WIDTH + score_margin) {
+        return false; // Too far to the side
+    }
+
+    if (goal_team_out) {
+        // RS_TEAM_FROM_Y(score_dir_sgn): score_dir_sgn > 0 -> Team::ORANGE (1), score_dir_sgn < 0 -> Team::BLUE (0)
+        *goal_team_out = (score_dir_sgn < 0.0f) ? 0 : 1;
+    }
+
+    return true;
+}
+
+/**
+ * @brief Checks if the ball has crossed the goal score threshold.
+ */
+__device__ __host__ __forceinline__ bool is_ball_scored(
+    const Vec3& ball_pos,
+    float goal_threshold_y = GOAL_SCORE_THRESHOLD_Y)
+{
+    return fabsf(ball_pos.y) > goal_threshold_y;
+}
+
 } // namespace rocketsim_cuda

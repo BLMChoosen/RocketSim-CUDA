@@ -7,6 +7,8 @@
 #include "rocketsim_cuda/config.h"
 #include "rocketsim_cuda/sim_context.cuh"
 #include "rocketsim_cuda/types/arena_state.cuh"
+#include "rocketsim_cuda/types/game_event_tracker.cuh"
+#include "rocketsim_cuda/physics/arena_sdf.cuh"
 
 namespace nb = nanobind;
 using namespace rocketsim_cuda;
@@ -576,6 +578,12 @@ NB_MODULE(rocketsim_cuda, m) {
                 double sum = 0.0;
                 for (auto x : h_buf) sum += x;
                 return sum;
+            } else if (v.dtype == "uint32") {
+                std::vector<uint32_t> h_buf(total_elements);
+                cudaMemcpy(h_buf.data(), v.data, total_elements * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+                double sum = 0.0;
+                for (auto x : h_buf) sum += x;
+                return sum;
             }
             return 0.0;
         })
@@ -597,6 +605,16 @@ NB_MODULE(rocketsim_cuda, m) {
             s += "], dtype=" + v.dtype + ", device=cuda:0)";
             return s;
         });
+
+    nb::class_<GameEventTrackerConfig>(m, "GameEventTrackerConfig")
+        .def(nb::init<>())
+        .def_rw("shot_min_speed", &GameEventTrackerConfig::shot_min_speed)
+        .def_rw("shot_touch_min_delay", &GameEventTrackerConfig::shot_touch_min_delay)
+        .def_rw("pred_score_extra_margin", &GameEventTrackerConfig::pred_score_extra_margin)
+        .def_rw("shot_event_cooldown", &GameEventTrackerConfig::shot_event_cooldown)
+        .def_rw("shot_min_score_time", &GameEventTrackerConfig::shot_min_score_time)
+        .def_rw("goal_max_touch_time", &GameEventTrackerConfig::goal_max_touch_time)
+        .def_rw("pass_max_touch_time", &GameEventTrackerConfig::pass_max_touch_time);
 
     nb::class_<SimContext>(m, "SimContext")
         .def(nb::init<uint32_t, uint32_t>(),
@@ -935,6 +953,196 @@ NB_MODULE(rocketsim_cuda, m) {
             v.owner = nb::borrow(self);
             return v;
         }, "Get DLPack CUDA tensor view of Truncated flags [num_envs]")
+        // Game Event Tracking Views
+        .def("get_step_touches", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().step_touches;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Step Ball Touches [num_envs, cars_per_env]")
+        .def("get_step_shots", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().step_shots;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Step Shots on Goal [num_envs, cars_per_env]")
+        .def("get_step_saves", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().step_saves;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Step Saves [num_envs, cars_per_env]")
+        .def("get_step_goals", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().step_goals;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Step Goals Scored [num_envs, cars_per_env]")
+        .def("get_step_assists", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().step_assists;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Step Assists [num_envs, cars_per_env]")
+        .def("get_total_touches", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().total_touches;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint32";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Lifetime Total Touches [num_envs, cars_per_env]")
+        .def("get_total_shots", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().total_shots;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint32";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Lifetime Total Shots [num_envs, cars_per_env]")
+        .def("get_total_saves", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().total_saves;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint32";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Lifetime Total Saves [num_envs, cars_per_env]")
+        .def("get_total_goals", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().total_goals;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint32";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Lifetime Total Goals [num_envs, cars_per_env]")
+        .def("get_total_assists", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventCarEvents().total_assists;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()), static_cast<int64_t>(ctx.GetCarsPerEnv()) };
+            v.strides = { static_cast<int64_t>(ctx.GetCarsPerEnv()), 1 };
+            v.dtype = "uint32";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Lifetime Total Assists [num_envs, cars_per_env]")
+        .def("get_ball_shot", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventEnvState().ball_shot;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()) };
+            v.strides = { 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Ball Shot status [num_envs]")
+        .def("get_ball_shot_goal_team", [](nb::handle self) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            GpuTensorView v;
+            v.data = ctx.GetGameEventEnvState().ball_shot_goal_team;
+            v.shape = { static_cast<int64_t>(ctx.GetNumEnvs()) };
+            v.strides = { 1 };
+            v.dtype = "uint8";
+            v.device_type = 2;
+            v.device_id = 0;
+            v.owner = nb::borrow(self);
+            return v;
+        }, "Get DLPack CUDA tensor view of Defending Team of Ball Shot [num_envs]")
+        .def("get_game_event_tracker_config", &SimContext::GetGameEventTrackerConfig)
+        .def("set_game_event_tracker_config", &SimContext::SetGameEventTrackerConfig, nb::arg("config"))
+        .def("is_game_event_tracking_enabled", &SimContext::IsGameEventTrackingEnabled)
+        .def("set_game_event_tracking_enabled", &SimContext::SetGameEventTrackingEnabled, nb::arg("enabled"))
+        .def("update_game_events", [](SimContext& ctx, float delta_time, uint32_t delta_ticks) {
+            ctx.UpdateGameEvents(delta_time, delta_ticks);
+        }, nb::arg("delta_time") = DELTA_TIME, nb::arg("delta_ticks") = 1, "Manually update game events")
+        .def("reset_game_events", [](SimContext& ctx, int32_t env_idx) {
+            ctx.ResetGameEvents(env_idx);
+        }, nb::arg("env_idx") = -1, "Reset game event tracking state (-1 for all)")
+        .def("reset_game_events_indexed", [](SimContext& ctx, nb::object indices) {
+            auto idx_buf = get_indices_buffer(indices, ctx.GetStream());
+            if (idx_buf.is_provided && idx_buf.count > 0 && idx_buf.d_indices) {
+                ctx.ResetGameEventsIndexed(idx_buf.d_indices, idx_buf.count);
+            }
+            if (idx_buf.needs_free) {
+                if (ctx.GetStream()) cudaStreamSynchronize(ctx.GetStream()); else cudaDeviceSynchronize();
+            }
+            release_indices_buffer(idx_buf);
+        }, nb::arg("indices"), "Reset game event tracking state for specified env indices")
+        .def("is_ball_probably_going_in", [](nb::handle self, float max_time, float extra_margin) {
+            auto& ctx = nb::cast<SimContext&>(self);
+            ctx.EvaluateIsBallProbablyGoingIn(max_time, extra_margin);
+
+            GpuTensorView v_in;
+            v_in.data = ctx.GetIsBallProbablyGoingIn();
+            v_in.shape = { static_cast<int64_t>(ctx.GetNumEnvs()) };
+            v_in.strides = { 1 };
+            v_in.dtype = "uint8";
+            v_in.device_type = 2;
+            v_in.device_id = 0;
+            v_in.owner = nb::borrow(self);
+
+            GpuTensorView v_team;
+            v_team.data = ctx.GetBallProbablyGoingInGoalTeam();
+            v_team.shape = { static_cast<int64_t>(ctx.GetNumEnvs()) };
+            v_team.strides = { 1 };
+            v_team.dtype = "int32";
+            v_team.device_type = 2;
+            v_team.device_id = 0;
+            v_team.owner = nb::borrow(self);
+
+            return nb::make_tuple(v_in, v_team);
+        }, nb::arg("max_time") = 2.0f, nb::arg("extra_margin") = 0.0f,
+        "Extrapolate ball trajectory analytically to predict if it will enter a net within max_time.")
         .def("get_stream", [](const SimContext& ctx) {
             return reinterpret_cast<uintptr_t>(ctx.GetStream());
         }, "Get raw CUDA stream pointer (uintptr_t)")
@@ -1439,6 +1647,28 @@ NB_MODULE(rocketsim_cuda, m) {
         v.owner = cleanup;
         return v;
     }, nb::arg("shape"), nb::arg("dtype") = "float32", "Allocate a zeroed GPU tensor in VRAM");
+
+    m.def("is_ball_probably_going_in", [](
+        nb::sequence pos, nb::sequence vel, float max_time, float extra_margin
+    ) -> nb::tuple {
+        if (nb::len(pos) != 3 || nb::len(vel) != 3) {
+            throw std::invalid_argument("is_ball_probably_going_in: pos and vel must each have 3 elements");
+        }
+        Vec3 ball_pos(
+            nb::cast<float>(pos[0]),
+            nb::cast<float>(pos[1]),
+            nb::cast<float>(pos[2])
+        );
+        Vec3 ball_vel(
+            nb::cast<float>(vel[0]),
+            nb::cast<float>(vel[1]),
+            nb::cast<float>(vel[2])
+        );
+        int32_t goal_team = -1;
+        bool going_in = is_ball_probably_going_in(ball_pos, ball_vel, max_time, extra_margin, &goal_team);
+        return nb::make_tuple(going_in, goal_team);
+    }, nb::arg("pos"), nb::arg("vel"), nb::arg("max_time") = 2.0f, nb::arg("extra_margin") = 0.0f,
+    "Extrapolate ball trajectory analytically to predict if it will enter a net within max_time.");
 
     m.def("get_vram_info", []() {
         size_t free_b = 0, total_b = 0;

@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "rocketsim-cuda"
-version = "0.3.0"
+version = "0.1.8"
 description = "Ultra-parallel native C++/CUDA RocketSim physics engine with zero-copy PyTorch/DLPack tensors"
 readme = "README.md"
 requires-python = ">=3.9"

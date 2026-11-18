@@ -14,6 +14,10 @@ namespace RocketSim {
     class Car;
 }
 
+class btTriangleMesh;
+class btBvhTriangleMeshShape;
+struct btTriangleInfoMap;
+
 namespace rocketsim_cuda {
 
 class CPURefSim {
@@ -44,6 +48,7 @@ public:
     const RocketSim::Arena* GetArena() const { return m_arena; }
     uint64_t GetTickCount() const;
     void GetWheelDebug(int carIdx, int w, float& susp_force, float& v_rel, float& pushback, float& comp_bt) const;
+    bool IsBallProbablyGoingIn(float maxTime = 2.0f, float extraMargin = 0.0f, int* goalTeamOut = nullptr) const;
     void DumpCarInternalState(int carIdx) const;
 
 private:
@@ -51,6 +56,9 @@ private:
     void CleanupArena();
 
     RocketSim::Arena* m_arena = nullptr;
+    btTriangleMesh* m_arenaMesh = nullptr;
+    btBvhTriangleMeshShape* m_arenaMeshShape = nullptr;
+    btTriangleInfoMap* m_arenaMeshInfoMap = nullptr;
     std::vector<RocketSim::Car*> m_cars;
     int m_numCars = 1;
     bool m_addFloor = true;

@@ -1,10 +1,10 @@
 <div align="center">
 
-# RocketSim-CUDA (v0.1.0)
+# RocketSim-CUDA (v0.1.8)
 
 **Massively Parallel, GPU-Native Rocket League Physics Simulation Engine for Reinforcement Learning**
 
-[![Release](https://img.shields.io/badge/Release-v0.1.0-blue.svg)](https://github.com/ZealanL/RocketSim)
+[![Release](https://img.shields.io/badge/Release-v0.1.8-blue.svg)](https://github.com/ZealanL/RocketSim)
 [![CUDA](https://img.shields.io/badge/CUDA-12.0%2B-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
 [![C++](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B%20Zero--Copy-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
@@ -37,14 +37,15 @@ While the original [RocketSim](https://github.com/ZealanL/RocketSim) is exceptio
 
 ---
 
-## Key Features (v0.1.0)
+## Key Features (v0.1.8)
 
 * **Massive Concurrency:** Simulate **16,384 to 65,536+ environments concurrently** on a single consumer or data-center GPU (exceeding **375 Million SPS** in 1v0 and **534 Million Agent SPS** in 1v1).
 * **Multi-Car Match Formats:** Full support for 1v0, 1v1 (2 cars), 2v2 (4 cars), and 3v3 (6 cars) match configurations.
 * **All-Pairs Car-Car Collisions & Bumps:** 15-axis OBB-OBB SAT detector, 4-point contact clipping manifold, bilateral restitution and Coulomb friction, and RocketSim bumper bump curves (`RLConst.h:505-527`).
 * **Supersonic Demolitions & Respawn:** Dual-threshold supersonic state machine (2200/2100 UU/s), bumper demo triggers, victim physics suppression, and canonical Soccar respawn coordinates.
 * **Zero-Copy PyTorch / DLPack Pipeline:** Observation, action, and termination tensors live exclusively in VRAM. Step tens of thousands of environments without PCIe transfers.
-* **Closed-Form Analytic Arena SDF:** Replaces mesh raycasts and dynamic BVH tree traversals with closed-form $O(1)$ Signed Distance Fields for walls, corners, curved ramps, and goal cavities.
+* **Closed-Form Analytic Arena SDF & Goal Prediction:** Closed-form $O(1)$ Signed Distance Fields for walls, corners, curved ramps ($R = 260\text{ UU}$), and goal cavities, plus analytical goal anticipation (`is_ball_probably_going_in` / `Arena::IsBallProbablyGoingIn`).
+* **GPU GameEventTracker:** High-throughput on-device event tracking for shots on goal, saves, assists, touches, and goals with zero-copy tensor views.
 * **Faithful Multi-Body Suspension:** Port of RocketSim's `btVehicleRL` 4-wheel suspension raycaster tracing against arena SDF, dynamic balls, and other car chassis, with Newton's 3rd law reaction impulses and ground support flip reset.
 * **6 Official Hitbox Presets:** Canonical presets supported via constant lookup: Octane, Dominus, Plank (Batmobile), Breakout, Hybrid, Merc, and Psyclops with exact center offsets and inertia tensors.
 * **Custom Arena & Mutator Configs:** Runtime per-arena mutator structs supporting custom gravity, ball mass/radius, restitution, friction, boost acceleration, and demo modes.
@@ -149,7 +150,7 @@ Parity is validated against **RocketSim CPU** (Bullet Physics 3.24 reference ora
 
 To preserve strict scientific and engineering rigor, the following scope boundaries are defined:
 
-* **In Scope (v0.1.0):** Complete physical modeling of the standard **Soccar** arena geometry with closed-form Signed Distance Fields (walls, corner chamfers, cylindrical ramps, goal cavities), standard ball physics, 6 hitbox presets, all-pairs vehicle collisions, supersonic demolitions, boost pads, and 1v0/1v1/2v2/3v3 team formats.
+* **In Scope (v0.1.8):** Complete physical modeling of the standard **Soccar** arena geometry with closed-form Signed Distance Fields (walls, corner chamfers, cylindrical ramps, goal cavities), standard ball physics, 6 hitbox presets, all-pairs vehicle collisions, supersonic demolitions, boost pads, and 1v0/1v1/2v2/3v3 team formats.
 * **Explicitly Out of Scope:**
   - **Hoops:** Requires elevated cylindrical rim geometry, dynamic net mesh solvers, and vertical goal triggers.
   - **Dropshot:** Requires dynamic hexagonal floor tile state machines (intact/damaged/open) and dynamic hole collisions.

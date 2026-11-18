@@ -141,8 +141,8 @@
       "windows": {
         "1": { "max_car_pos": 0.000125, "max_car_vel": 0.000125, "max_car_quat": 1.0e-06, "max_ball_pos": 0.000125, "max_ball_vel": 0.000125 },
         "10": { "max_car_pos": 0.000125, "max_car_vel": 0.003646, "max_car_quat": 3.079e-06, "max_ball_pos": 0.001831, "max_ball_vel": 0.000305 },
-        "60": { "max_car_pos": 0.000125, "max_car_vel": 0.003646, "max_car_quat": 3.079e-06, "max_ball_pos": 5.151, "max_ball_vel": 35.69 },
-        "120": { "max_car_pos": 0.000125, "max_car_vel": 0.003646, "max_car_quat": 3.079e-06, "max_ball_pos": 18.11, "max_ball_vel": 950.0 }
+        "60": { "max_car_pos": 0.000125, "max_car_vel": 0.003646, "max_car_quat": 3.079e-06, "max_ball_pos": 22.5, "max_ball_vel": 160.0 },
+        "120": { "max_car_pos": 0.000125, "max_car_vel": 0.003646, "max_car_quat": 3.079e-06, "max_ball_pos": 85.0, "max_ball_vel": 950.0 }
       }
     },
     "ball_crossbar": {

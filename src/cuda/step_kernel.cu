@@ -592,6 +592,10 @@ void sim_step_batch(SimContext* ctx, uint32_t batch_size, const CarControlsSoA* 
         ctx->GetArenaConfig(),
         ctx->GetCarConfig()
     );
+
+    if (ctx->IsGameEventTrackingEnabled()) {
+        ctx->UpdateGameEvents(DELTA_TIME, 1);
+    }
 }
 
 void SimContext::Step(uint32_t batch_size, const float* actions_tensor) {

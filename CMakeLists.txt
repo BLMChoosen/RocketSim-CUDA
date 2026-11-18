@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RocketSim-CUDA LANGUAGES CXX CUDA)
+project(RocketSim-CUDA VERSION 0.1.8 LANGUAGES CXX CUDA)
 
 # C++20 and CUDA standards
 set(CMAKE_CXX_STANDARD 20)

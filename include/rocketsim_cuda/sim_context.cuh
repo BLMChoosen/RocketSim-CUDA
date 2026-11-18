@@ -9,6 +9,7 @@
 #include "types/arena_state.cuh"
 #include "types/car_config.cuh"
 #include "types/arena_config.cuh"
+#include "types/game_event_tracker.cuh"
 
 namespace rocketsim_cuda {
 
@@ -121,6 +122,26 @@ public:
         int64_t stride_out_tick = 0,
         int64_t stride_out_col = 1);
 
+    // Game Event Tracking (Shots on goal, saves, assists, goals, touches)
+    const GameEventTrackerConfig& GetGameEventTrackerConfig() const { return m_event_tracker_config; }
+    void SetGameEventTrackerConfig(const GameEventTrackerConfig& cfg) { m_event_tracker_config = cfg; }
+    bool IsGameEventTrackingEnabled() const { return m_event_tracking_enabled; }
+    void SetGameEventTrackingEnabled(bool enabled) { m_event_tracking_enabled = enabled; }
+    const GameEventTrackerEnvStateSoA& GetGameEventEnvState() const { return m_event_env_state; }
+    GameEventTrackerEnvStateSoA& GetGameEventEnvState() { return m_event_env_state; }
+    const GameEventTrackerCarEventsSoA& GetGameEventCarEvents() const { return m_event_car_events; }
+    GameEventTrackerCarEventsSoA& GetGameEventCarEvents() { return m_event_car_events; }
+    void UpdateGameEvents(float delta_time = DELTA_TIME, uint32_t delta_ticks = 1);
+    void ResetGameEvents(int32_t env_idx = -1);
+    void ResetGameEventsIndexed(const int32_t* d_env_indices, uint32_t num_resets);
+
+    // Goal Extrapolation (IsBallProbablyGoingIn)
+    void EvaluateIsBallProbablyGoingIn(float max_time = 2.0f, float extra_margin = 0.0f);
+    const uint8_t* GetIsBallProbablyGoingIn() const { return m_d_is_ball_probably_going_in; }
+    uint8_t* GetIsBallProbablyGoingIn() { return m_d_is_ball_probably_going_in; }
+    const int32_t* GetBallProbablyGoingInGoalTeam() const { return m_d_ball_probably_going_in_goal_team; }
+    int32_t* GetBallProbablyGoingInGoalTeam() { return m_d_ball_probably_going_in_goal_team; }
+
     // Simulation Step
     void Step(uint32_t batch_size = 0, const float* actions_tensor = nullptr);
 
@@ -142,6 +163,14 @@ private:
     CarConfigSoA m_car_config;
     MutatorConfigSoA m_mutator_config;
     ArenaConfigSoA m_arena_config;
+
+    // Game Event Tracking & Goal Prediction
+    GameEventTrackerConfig m_event_tracker_config;
+    bool m_event_tracking_enabled = true;
+    GameEventTrackerEnvStateSoA m_event_env_state;
+    GameEventTrackerCarEventsSoA m_event_car_events;
+    uint8_t* m_d_is_ball_probably_going_in = nullptr;
+    int32_t* m_d_ball_probably_going_in_goal_team = nullptr;
 };
 
 // Global Simulation Step Entry Point (GEMINI.md Section 6.2)

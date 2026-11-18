@@ -230,6 +230,64 @@ class RocketSimBatchedEnv:
         """Alias for get_is_on_ground: shape [num_envs, cars_per_env] in GPU VRAM."""
         return self.get_is_on_ground()
 
+    def is_ball_probably_going_in(self, max_time: float = 2.0, extra_margin: float = 0.0) -> Tuple[Any, Any]:
+        """Extrapolate ball trajectory analytically to predict if it will enter a net within max_time."""
+        is_going_in, goal_team = self.sim.is_ball_probably_going_in(max_time, extra_margin)
+        return self._wrap(is_going_in), self._wrap(goal_team)
+
+    def get_step_touches(self) -> Any:
+        return self._wrap(self.sim.get_step_touches())
+
+    def get_step_shots(self) -> Any:
+        return self._wrap(self.sim.get_step_shots())
+
+    def get_step_saves(self) -> Any:
+        return self._wrap(self.sim.get_step_saves())
+
+    def get_step_goals(self) -> Any:
+        return self._wrap(self.sim.get_step_goals())
+
+    def get_step_assists(self) -> Any:
+        return self._wrap(self.sim.get_step_assists())
+
+    def get_total_touches(self) -> Any:
+        return self._wrap(self.sim.get_total_touches())
+
+    def get_total_shots(self) -> Any:
+        return self._wrap(self.sim.get_total_shots())
+
+    def get_total_saves(self) -> Any:
+        return self._wrap(self.sim.get_total_saves())
+
+    def get_total_goals(self) -> Any:
+        return self._wrap(self.sim.get_total_goals())
+
+    def get_total_assists(self) -> Any:
+        return self._wrap(self.sim.get_total_assists())
+
+    def get_ball_shot(self) -> Any:
+        return self._wrap(self.sim.get_ball_shot())
+
+    def get_ball_shot_goal_team(self) -> Any:
+        return self._wrap(self.sim.get_ball_shot_goal_team())
+
+    def get_game_events(self) -> Dict[str, Any]:
+        return {
+            "step_touches": self.get_step_touches(),
+            "step_shots": self.get_step_shots(),
+            "step_saves": self.get_step_saves(),
+            "step_goals": self.get_step_goals(),
+            "step_assists": self.get_step_assists(),
+            "total_touches": self.get_total_touches(),
+            "total_shots": self.get_total_shots(),
+            "total_saves": self.get_total_saves(),
+            "total_goals": self.get_total_goals(),
+            "total_assists": self.get_total_assists(),
+        }
+
+    def reset_game_events(self, env_idx: int = -1):
+        self.sim.reset_game_events(env_idx)
+
     @property
     def observations(self) -> Dict[str, Any]:
         """Dictionary exposing car and ball zero-copy tensors in GPU VRAM."""
@@ -257,6 +315,16 @@ class RocketSimBatchedEnv:
             "has_flipped": self.get_has_flipped(),
             "boost": self.get_boost(),
             "on_ground": self.get_on_ground(),
+            "step_touches": self.get_step_touches(),
+            "step_shots": self.get_step_shots(),
+            "step_saves": self.get_step_saves(),
+            "step_goals": self.get_step_goals(),
+            "step_assists": self.get_step_assists(),
+            "total_touches": self.get_total_touches(),
+            "total_shots": self.get_total_shots(),
+            "total_saves": self.get_total_saves(),
+            "total_goals": self.get_total_goals(),
+            "total_assists": self.get_total_assists(),
         }
 
     def step(
@@ -465,8 +533,71 @@ class BallPredTracker:
         return traj[env_idx, tick]
 
 
+class GameEventTracker:
+    """
+    Tracks saves, shots, assists, goals, and touches directly on GPU.
+    Compatible with RocketSim CPU GameEventTracker.
+    """
+    def __init__(self, sim_or_env: Any = None, env: Any = None, config: Optional[Any] = None):
+        target = env if env is not None else sim_or_env
+        if target is None:
+            raise ValueError("Must provide a SimContext or RocketSimBatchedEnv to GameEventTracker")
+        if hasattr(target, "sim"):
+            self.sim = target.sim
+            self.env = target
+        else:
+            self.sim = target
+            self.env = None
+
+        if config is not None:
+            self.config = config
+            self.sim.set_game_event_tracker_config(config)
+        else:
+            self.config = self.sim.get_game_event_tracker_config()
+
+        self._shot_callback = None
+        self._goal_callback = None
+        self._save_callback = None
+
+    def set_shot_callback(self, callback_fn):
+        self._shot_callback = callback_fn
+
+    def set_goal_callback(self, callback_fn):
+        self._goal_callback = callback_fn
+
+    def set_save_callback(self, callback_fn):
+        self._save_callback = callback_fn
+
+    def update(self, delta_time: float = 1.0 / 120.0, delta_ticks: int = 1):
+        self.sim.update_game_events(delta_time, delta_ticks)
+
+    def reset_persistent_info(self, env_idx: int = -1):
+        self.sim.reset_game_events(env_idx)
+
+    def get_step_events(self) -> Dict[str, Any]:
+        wrap = self.env._wrap if self.env is not None and hasattr(self.env, "_wrap") else lambda x: x
+        return {
+            "touches": wrap(self.sim.get_step_touches()),
+            "shots": wrap(self.sim.get_step_shots()),
+            "saves": wrap(self.sim.get_step_saves()),
+            "goals": wrap(self.sim.get_step_goals()),
+            "assists": wrap(self.sim.get_step_assists()),
+        }
+
+    def get_totals(self) -> Dict[str, Any]:
+        wrap = self.env._wrap if self.env is not None and hasattr(self.env, "_wrap") else lambda x: x
+        return {
+            "touches": wrap(self.sim.get_total_touches()),
+            "shots": wrap(self.sim.get_total_shots()),
+            "saves": wrap(self.sim.get_total_saves()),
+            "goals": wrap(self.sim.get_total_goals()),
+            "assists": wrap(self.sim.get_total_assists()),
+        }
+
+
 # Expose in rocketsim_cuda module per orchestrator requirement
 rocketsim_cuda.RocketSimBatchedEnv = RocketSimBatchedEnv
 rocketsim_cuda.BallPredTracker = BallPredTracker
+rocketsim_cuda.GameEventTracker = GameEventTracker
 rocketsim_cuda.gym_env = sys.modules[__name__]
 

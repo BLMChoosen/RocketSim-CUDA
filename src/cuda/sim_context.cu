@@ -1,5 +1,6 @@
 #include "rocketsim_cuda/sim_context.cuh"
 #include "rocketsim_cuda/physics/ball_dynamics.cuh"
+#include "rocketsim_cuda/physics/arena_sdf.cuh"
 #include <stdexcept>
 #include <iostream>
 
@@ -279,6 +280,55 @@ __global__ void k_reset_environments_masked(
     }
 }
 
+__global__ void k_reset_game_events(
+    uint32_t num_envs,
+    GameEventTrackerEnvStateSoA env_state,
+    int32_t target_env)
+{
+    uint32_t env_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (env_idx >= num_envs) return;
+    if (target_env >= 0 && static_cast<int32_t>(env_idx) != target_env) return;
+
+    env_state.ball_shot[env_idx] = 0;
+    env_state.ball_shot_goal_team[env_idx] = 0;
+    env_state.shot_cooldown[env_idx] = 0.0f;
+    env_state.ball_scored_last[env_idx] = 0;
+}
+
+template <typename TIndex>
+__global__ void k_reset_game_events_indexed(
+    const TIndex* __restrict__ d_indices,
+    uint32_t num_resets,
+    uint32_t num_envs,
+    GameEventTrackerEnvStateSoA env_state)
+{
+    uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_resets) return;
+
+    int64_t env_idx = static_cast<int64_t>(d_indices[idx]);
+    if (env_idx < 0 || static_cast<uint32_t>(env_idx) >= num_envs) return;
+
+    env_state.ball_shot[env_idx] = 0;
+    env_state.ball_shot_goal_team[env_idx] = 0;
+    env_state.shot_cooldown[env_idx] = 0.0f;
+    env_state.ball_scored_last[env_idx] = 0;
+}
+
+__global__ void k_reset_game_events_masked(
+    const uint8_t* __restrict__ d_reset_mask,
+    uint32_t num_envs,
+    GameEventTrackerEnvStateSoA env_state)
+{
+    uint32_t env_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (env_idx >= num_envs) return;
+    if (d_reset_mask[env_idx] == 0) return;
+
+    env_state.ball_shot[env_idx] = 0;
+    env_state.ball_shot_goal_team[env_idx] = 0;
+    env_state.shot_cooldown[env_idx] = 0.0f;
+    env_state.ball_scored_last[env_idx] = 0;
+}
+
 __global__ void k_export_ball_pod(BallStateSoA src, BallStatePOD* dst, uint32_t count, uint32_t start_env) {
     uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= count) return;
@@ -462,6 +512,17 @@ void SimContext::AllocateArena() {
     total += calc_slice(env_count * MAX_BOOST_PADS, sizeof(uint8_t)); // pad_is_active
     total += calc_slice(env_count * MAX_BOOST_PADS, sizeof(float));   // pad_cooldown
 
+    // --- Game Event Tracking SoA slices (GEMINI.md SoA layout) ---
+    total += calc_slice(env_count, sizeof(uint8_t));                  // ball_shot
+    total += calc_slice(env_count, sizeof(uint8_t));                  // ball_shot_goal_team
+    total += calc_slice(env_count, sizeof(float));                    // shot_cooldown
+    total += calc_slice(env_count, sizeof(uint8_t));                  // ball_scored_last
+    total += calc_slice(env_count, sizeof(uint8_t));                  // is_ball_probably_going_in
+    total += calc_slice(env_count, sizeof(int32_t));                  // ball_probably_going_in_goal_team
+
+    total += calc_slice(car_count, sizeof(uint8_t)) * 5;              // step touches, shots, saves, goals, assists
+    total += calc_slice(car_count, sizeof(uint32_t)) * 5;             // total touches, shots, saves, goals, assists
+
     // --- Staging POD buffers (pre-allocated to eliminate runtime allocations) ---
     total += calc_slice(env_count, sizeof(BallStatePOD));
     total += calc_slice(car_count, sizeof(CarStatePOD));
@@ -640,6 +701,27 @@ void SimContext::AllocateArena() {
     m_arena_state.rewards          = static_cast<float*>(assign_slice(car_count, sizeof(float)));
     m_arena_state.pad_is_active    = static_cast<uint8_t*>(assign_slice(env_count * MAX_BOOST_PADS, sizeof(uint8_t)));
     m_arena_state.pad_cooldown     = static_cast<float*>(assign_slice(env_count * MAX_BOOST_PADS, sizeof(float)));
+
+    // Assign Game Event Tracker & Goal Prediction SoA pointers
+    m_event_env_state.ball_shot           = static_cast<uint8_t*>(assign_slice(env_count, sizeof(uint8_t)));
+    m_event_env_state.ball_shot_goal_team = static_cast<uint8_t*>(assign_slice(env_count, sizeof(uint8_t)));
+    m_event_env_state.shot_cooldown       = static_cast<float*>(assign_slice(env_count, sizeof(float)));
+    m_event_env_state.ball_scored_last    = static_cast<uint8_t*>(assign_slice(env_count, sizeof(uint8_t)));
+
+    m_d_is_ball_probably_going_in         = static_cast<uint8_t*>(assign_slice(env_count, sizeof(uint8_t)));
+    m_d_ball_probably_going_in_goal_team  = static_cast<int32_t*>(assign_slice(env_count, sizeof(int32_t)));
+
+    m_event_car_events.step_touches       = static_cast<uint8_t*>(assign_slice(car_count, sizeof(uint8_t)));
+    m_event_car_events.step_shots         = static_cast<uint8_t*>(assign_slice(car_count, sizeof(uint8_t)));
+    m_event_car_events.step_saves         = static_cast<uint8_t*>(assign_slice(car_count, sizeof(uint8_t)));
+    m_event_car_events.step_goals         = static_cast<uint8_t*>(assign_slice(car_count, sizeof(uint8_t)));
+    m_event_car_events.step_assists       = static_cast<uint8_t*>(assign_slice(car_count, sizeof(uint8_t)));
+
+    m_event_car_events.total_touches      = static_cast<uint32_t*>(assign_slice(car_count, sizeof(uint32_t)));
+    m_event_car_events.total_shots        = static_cast<uint32_t*>(assign_slice(car_count, sizeof(uint32_t)));
+    m_event_car_events.total_saves        = static_cast<uint32_t*>(assign_slice(car_count, sizeof(uint32_t)));
+    m_event_car_events.total_goals        = static_cast<uint32_t*>(assign_slice(car_count, sizeof(uint32_t)));
+    m_event_car_events.total_assists      = static_cast<uint32_t*>(assign_slice(car_count, sizeof(uint32_t)));
 }
 
 void SimContext::FreeArena() {
@@ -648,6 +730,10 @@ void SimContext::FreeArena() {
         m_d_pool = nullptr;
     }
     m_allocated_bytes = 0;
+    m_d_is_ball_probably_going_in = nullptr;
+    m_d_ball_probably_going_in_goal_team = nullptr;
+    m_event_env_state = {};
+    m_event_car_events = {};
 }
 
 void SimContext::ResetToDefault() {
@@ -665,6 +751,8 @@ void SimContext::ResetToDefault() {
     uint32_t arena_blocks = (m_num_envs + threads - 1) / threads;
     k_init_arena_state<<<arena_blocks, threads, 0, m_stream>>>(m_arena_state, m_num_envs, m_cars_per_env);
 
+    ResetGameEvents(-1);
+
     if (m_stream) {
         cudaStreamSynchronize(m_stream);
     } else {
@@ -679,6 +767,7 @@ void SimContext::ResetEnvironmentsIndexed(const int32_t* d_env_indices, uint32_t
     k_reset_environments_indexed<<<blocks, threads, 0, m_stream>>>(
         d_env_indices, num_resets, m_cars_per_env, m_ball_state, m_car_state, m_arena_state, 0
     );
+    ResetGameEventsIndexed(d_env_indices, num_resets);
     // Asynchronous execution on m_stream with NO host synchronization barriers
 }
 
@@ -689,6 +778,11 @@ void SimContext::ResetEnvironmentsIndexed(const int64_t* d_env_indices, uint32_t
     k_reset_environments_indexed<<<blocks, threads, 0, m_stream>>>(
         d_env_indices, num_resets, m_cars_per_env, m_ball_state, m_car_state, m_arena_state, 0
     );
+    if (m_event_env_state.ball_shot) {
+        k_reset_game_events_indexed<<<blocks, threads, 0, m_stream>>>(
+            d_env_indices, num_resets, m_num_envs, m_event_env_state
+        );
+    }
     // Asynchronous execution on m_stream with NO host synchronization barriers
 }
 
@@ -699,6 +793,11 @@ void SimContext::ResetEnvironmentsMasked(const uint8_t* d_reset_mask) {
     k_reset_environments_masked<<<blocks, threads, 0, m_stream>>>(
         d_reset_mask, m_num_envs, m_cars_per_env, m_ball_state, m_car_state, m_arena_state, 0
     );
+    if (m_event_env_state.ball_shot) {
+        k_reset_game_events_masked<<<blocks, threads, 0, m_stream>>>(
+            d_reset_mask, m_num_envs, m_event_env_state
+        );
+    }
     // Asynchronous execution on m_stream with NO host synchronization barriers
 }
 
@@ -1216,6 +1315,307 @@ void SimContext::PredictBallTrajectory(
         stride_out_col,
         DELTA_TIME,
         m_mutator_config
+    );
+}
+
+__global__ void k_evaluate_is_ball_probably_going_in(
+    uint32_t num_envs,
+    const BallStateSoA ball_state,
+    float max_time,
+    float extra_margin,
+    uint8_t* __restrict__ out_going_in,
+    int32_t* __restrict__ out_goal_team,
+    float goal_base_threshold_y,
+    float ball_radius)
+{
+    uint32_t env_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (env_idx >= num_envs) return;
+
+    Vec3 ball_pos(ball_state.pos_x[env_idx], ball_state.pos_y[env_idx], ball_state.pos_z[env_idx]);
+    Vec3 ball_vel(ball_state.vel_x[env_idx], ball_state.vel_y[env_idx], ball_state.vel_z[env_idx]);
+
+    int32_t goal_team = -1;
+    bool going_in = is_ball_probably_going_in(
+        ball_pos,
+        ball_vel,
+        max_time,
+        extra_margin,
+        &goal_team,
+        goal_base_threshold_y,
+        ball_radius
+    );
+
+    out_going_in[env_idx] = going_in ? 1 : 0;
+    out_goal_team[env_idx] = goal_team;
+}
+
+__device__ __forceinline__ bool get_shooter_passer_gpu(
+    uint32_t env_idx,
+    uint32_t cars_per_env,
+    uint8_t target_team,
+    const CarStateSoA& car_state,
+    uint64_t current_tick,
+    uint64_t max_shooter_ticks,
+    uint64_t max_passer_ticks,
+    int32_t& shooter_out,
+    int32_t& passer_out,
+    bool find_passer)
+{
+    shooter_out = -1;
+    passer_out = -1;
+
+    uint64_t best_shooter_tick = 0;
+    for (uint32_t c = 0; c < cars_per_env; c++) {
+        uint32_t car_idx = env_idx * cars_per_env + c;
+        if (car_state.team[car_idx] != target_team) continue;
+        if (!car_state.ball_hit_is_valid[car_idx]) continue;
+
+        uint64_t hit_tick = car_state.ball_hit_tick_count[car_idx];
+        if (hit_tick + max_shooter_ticks >= current_tick) {
+            if (shooter_out < 0 || hit_tick > best_shooter_tick) {
+                shooter_out = static_cast<int32_t>(car_idx);
+                best_shooter_tick = hit_tick;
+            }
+        }
+    }
+
+    if (shooter_out >= 0 && find_passer) {
+        uint64_t best_passer_tick = 0;
+        for (uint32_t c = 0; c < cars_per_env; c++) {
+            uint32_t car_idx = env_idx * cars_per_env + c;
+            if (car_state.team[car_idx] != target_team) continue;
+            if (!car_state.ball_hit_is_valid[car_idx]) continue;
+            if (static_cast<int32_t>(car_idx) == shooter_out) continue;
+
+            uint64_t hit_tick = car_state.ball_hit_tick_count[car_idx];
+            if (hit_tick + max_passer_ticks >= best_shooter_tick) {
+                if (passer_out < 0 || hit_tick > best_passer_tick) {
+                    passer_out = static_cast<int32_t>(car_idx);
+                    best_passer_tick = hit_tick;
+                }
+            }
+        }
+    }
+
+    return shooter_out >= 0;
+}
+
+__global__ void k_update_game_events(
+    uint32_t num_envs,
+    uint32_t cars_per_env,
+    const BallStateSoA ball_state,
+    const CarStateSoA car_state,
+    const ArenaStateSoA arena_state,
+    GameEventTrackerEnvStateSoA env_state,
+    GameEventTrackerCarEventsSoA car_events,
+    GameEventTrackerConfig config,
+    float delta_time,
+    uint32_t delta_ticks,
+    float goal_base_threshold_y,
+    float ball_radius)
+{
+    uint32_t env_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (env_idx >= num_envs) return;
+
+    uint32_t current_tick = arena_state.tick_count[env_idx];
+    float tickrate = 1.0f / DELTA_TIME; // 120.0f
+    float score_threshold_y = goal_base_threshold_y + ball_radius;
+
+    Vec3 ball_pos(ball_state.pos_x[env_idx], ball_state.pos_y[env_idx], ball_state.pos_z[env_idx]);
+    Vec3 ball_vel(ball_state.vel_x[env_idx], ball_state.vel_y[env_idx], ball_state.vel_z[env_idx]);
+
+    // 1. Reset per-step car events and detect touches
+    for (uint32_t c = 0; c < cars_per_env; c++) {
+        uint32_t car_idx = env_idx * cars_per_env + c;
+        car_events.step_shots[car_idx] = 0;
+        car_events.step_saves[car_idx] = 0;
+        car_events.step_goals[car_idx] = 0;
+        car_events.step_assists[car_idx] = 0;
+
+        uint8_t touched = car_state.ball_touched ? car_state.ball_touched[car_idx] : 0;
+        car_events.step_touches[car_idx] = touched;
+        if (touched) {
+            car_events.total_touches[car_idx] += 1;
+        }
+    }
+
+    bool scored = is_ball_scored(ball_pos, score_threshold_y);
+    bool was_scored_last = env_state.ball_scored_last[env_idx] != 0;
+
+    if (scored && !was_scored_last) {
+        // Goal scored event!
+        // RS_TEAM_FROM_Y(-ball_pos.y):
+        // If ball_pos.y > 0 (Orange net scored into), scoring team is BLUE (0).
+        // If ball_pos.y < 0 (Blue net scored into), scoring team is ORANGE (1).
+        uint8_t scoring_team = (ball_pos.y > 0.0f) ? 0 : 1;
+
+        int32_t shooter_idx = -1;
+        int32_t passer_idx = -1;
+        uint64_t max_shooter_ticks = static_cast<uint64_t>(config.goal_max_touch_time * tickrate);
+        uint64_t max_passer_ticks = static_cast<uint64_t>(config.pass_max_touch_time * tickrate);
+
+        if (get_shooter_passer_gpu(
+            env_idx, cars_per_env, scoring_team, car_state, current_tick,
+            max_shooter_ticks, max_passer_ticks, shooter_idx, passer_idx, true))
+        {
+            if (shooter_idx >= 0) {
+                car_events.step_goals[shooter_idx] = 1;
+                car_events.total_goals[shooter_idx] += 1;
+            }
+            if (passer_idx >= 0) {
+                car_events.step_assists[passer_idx] = 1;
+                car_events.total_assists[passer_idx] += 1;
+            }
+        }
+    } else if (!scored) {
+        uint8_t ball_shot = env_state.ball_shot[env_idx];
+        if (!ball_shot) {
+            float shot_cd = env_state.shot_cooldown[env_idx];
+            if (shot_cd > 0.0f) {
+                shot_cd = fmaxf(shot_cd - delta_time, 0.0f);
+                env_state.shot_cooldown[env_idx] = shot_cd;
+            } else {
+                float speed_sq = ball_vel.length_sq();
+                if (speed_sq >= config.shot_min_speed * config.shot_min_speed) {
+                    int32_t goal_team = 0;
+                    if (is_ball_probably_going_in(
+                        ball_pos, ball_vel, config.shot_min_score_time, config.pred_score_extra_margin,
+                        &goal_team, goal_base_threshold_y, ball_radius))
+                    {
+                        uint8_t shooter_team = (goal_team == 0) ? 1 : 0;
+                        uint64_t shot_min_touch_delay_ticks = static_cast<uint64_t>(config.shot_touch_min_delay * tickrate);
+                        uint64_t max_shooter_ticks = delta_ticks + shot_min_touch_delay_ticks;
+                        uint64_t max_passer_ticks = static_cast<uint64_t>(config.pass_max_touch_time * tickrate);
+
+                        int32_t shooter_idx = -1;
+                        int32_t passer_idx = -1;
+                        if (get_shooter_passer_gpu(
+                            env_idx, cars_per_env, shooter_team, car_state, current_tick,
+                            max_shooter_ticks, max_passer_ticks, shooter_idx, passer_idx, true))
+                        {
+                            uint64_t ticks_since_hit = (current_tick >= car_state.ball_hit_tick_count[shooter_idx])
+                                ? (current_tick - car_state.ball_hit_tick_count[shooter_idx])
+                                : 0;
+                            if (ticks_since_hit >= shot_min_touch_delay_ticks) {
+                                env_state.ball_shot[env_idx] = 1;
+                                env_state.ball_shot_goal_team[env_idx] = static_cast<uint8_t>(goal_team);
+                                env_state.shot_cooldown[env_idx] = config.shot_event_cooldown;
+
+                                car_events.step_shots[shooter_idx] = 1;
+                                car_events.total_shots[shooter_idx] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Ball is currently shot
+            int32_t dummy_team = 0;
+            bool will_score = is_ball_probably_going_in(
+                ball_pos, ball_vel, config.shot_min_score_time, config.pred_score_extra_margin,
+                &dummy_team, goal_base_threshold_y, ball_radius
+            );
+
+            if (!will_score) {
+                // Ball stopped going in (saved or missed)
+                uint8_t goal_team = env_state.ball_shot_goal_team[env_idx];
+                int32_t saver_idx = -1;
+                int32_t dummy_passer = -1;
+                if (get_shooter_passer_gpu(
+                    env_idx, cars_per_env, goal_team, car_state, current_tick,
+                    delta_ticks, 0, saver_idx, dummy_passer, false))
+                {
+                    if (saver_idx >= 0) {
+                        car_events.step_saves[saver_idx] = 1;
+                        car_events.total_saves[saver_idx] += 1;
+                    }
+                }
+                env_state.ball_shot[env_idx] = 0;
+            }
+        }
+    }
+
+    env_state.ball_scored_last[env_idx] = scored ? 1 : 0;
+}
+
+void SimContext::EvaluateIsBallProbablyGoingIn(float max_time, float extra_margin) {
+    if (m_num_envs == 0 || m_d_is_ball_probably_going_in == nullptr) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (m_num_envs + threads - 1) / threads;
+
+    float goal_base_threshold_y = m_mutator_config.goal_base_threshold_y
+        ? m_mutator_config.goal_base_threshold_y[0]
+        : SOCCAR_GOAL_SCORE_BASE_THRESHOLD_Y;
+    float ball_radius = m_mutator_config.ball_radius
+        ? m_mutator_config.ball_radius[0]
+        : BALL_RADIUS;
+
+    k_evaluate_is_ball_probably_going_in<<<blocks, threads, 0, m_stream>>>(
+        m_num_envs,
+        m_ball_state,
+        max_time,
+        extra_margin,
+        m_d_is_ball_probably_going_in,
+        m_d_ball_probably_going_in_goal_team,
+        goal_base_threshold_y,
+        ball_radius
+    );
+}
+
+void SimContext::UpdateGameEvents(float delta_time, uint32_t delta_ticks) {
+    if (m_num_envs == 0 || !m_event_tracking_enabled || m_event_env_state.ball_shot == nullptr) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (m_num_envs + threads - 1) / threads;
+
+    float goal_base_threshold_y = m_mutator_config.goal_base_threshold_y
+        ? m_mutator_config.goal_base_threshold_y[0]
+        : SOCCAR_GOAL_SCORE_BASE_THRESHOLD_Y;
+    float ball_radius = m_mutator_config.ball_radius
+        ? m_mutator_config.ball_radius[0]
+        : BALL_RADIUS;
+
+    k_update_game_events<<<blocks, threads, 0, m_stream>>>(
+        m_num_envs,
+        m_cars_per_env,
+        m_ball_state,
+        m_car_state,
+        m_arena_state,
+        m_event_env_state,
+        m_event_car_events,
+        m_event_tracker_config,
+        delta_time,
+        delta_ticks,
+        goal_base_threshold_y,
+        ball_radius
+    );
+}
+
+void SimContext::ResetGameEvents(int32_t env_idx) {
+    if (m_num_envs == 0 || m_event_env_state.ball_shot == nullptr) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (m_num_envs + threads - 1) / threads;
+
+    k_reset_game_events<<<blocks, threads, 0, m_stream>>>(
+        m_num_envs,
+        m_event_env_state,
+        env_idx
+    );
+}
+
+void SimContext::ResetGameEventsIndexed(const int32_t* d_env_indices, uint32_t num_resets) {
+    if (!d_env_indices || num_resets == 0 || m_event_env_state.ball_shot == nullptr) return;
+
+    constexpr uint32_t threads = 128;
+    uint32_t blocks = (num_resets + threads - 1) / threads;
+
+    k_reset_game_events_indexed<<<blocks, threads, 0, m_stream>>>(
+        d_env_indices,
+        num_resets,
+        m_num_envs,
+        m_event_env_state
     );
 }
 
