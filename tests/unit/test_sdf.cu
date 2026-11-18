@@ -33,6 +33,15 @@ struct SdfTestResult {
     bool ray_hit_ramp;
     float ray_dist_ramp;
     Vec3 ray_normal_ramp;
+
+    bool pred_orange_ok;
+    int32_t pred_orange_team;
+    bool pred_blue_ok;
+    int32_t pred_blue_team;
+    bool pred_slow_ok;
+    bool pred_wide_ok;
+    bool score_inside_ok;
+    bool score_past_ok;
 };
 
 __global__ void TestSdfKernel(SdfTestResult* result) {
@@ -74,6 +83,31 @@ __global__ void TestSdfKernel(SdfTestResult* result) {
         &result->ray_dist_ramp,
         &result->ray_normal_ramp
     );
+
+    // 9. Goal extrapolation tests (is_ball_probably_going_in)
+    int32_t team_o = -1;
+    result->pred_orange_ok = is_ball_probably_going_in(
+        Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 3000.0f, 0.0f), 2.0f, 0.0f, &team_o
+    );
+    result->pred_orange_team = team_o;
+
+    int32_t team_b = -1;
+    result->pred_blue_ok = is_ball_probably_going_in(
+        Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, -3000.0f, 0.0f), 2.0f, 0.0f, &team_b
+    );
+    result->pred_blue_team = team_b;
+
+    int32_t dummy = -1;
+    result->pred_slow_ok = is_ball_probably_going_in(
+        Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 500.0f, 0.0f), 2.0f, 0.0f, &dummy
+    );
+    result->pred_wide_ok = is_ball_probably_going_in(
+        Vec3(0.0f, 0.0f, 100.0f), Vec3(2000.0f, 3000.0f, 0.0f), 2.0f, 0.0f, &dummy
+    );
+
+    // 10. Goal scored boundary tests (is_ball_scored)
+    result->score_inside_ok = is_ball_scored(Vec3(0.0f, 5000.0f, 100.0f));
+    result->score_past_ok = is_ball_scored(Vec3(0.0f, 5300.0f, 100.0f));
 }
 
 int main() {
@@ -136,6 +170,22 @@ int main() {
               << ", normal = (" << h_res.ray_normal_ramp.x << ", " << h_res.ray_normal_ramp.y << ", " << h_res.ray_normal_ramp.z << ")\n";
     assert(h_res.ray_hit_ramp);
     assert(h_res.ray_dist_ramp > 0.0f && h_res.ray_dist_ramp <= 100.0f);
+
+    // 9. Verify Goal Extrapolation
+    std::cout << "  Goal Extrapolation (Orange): hit = " << h_res.pred_orange_ok << ", team = " << h_res.pred_orange_team << "\n";
+    assert(h_res.pred_orange_ok);
+    assert(h_res.pred_orange_team == 1);
+
+    std::cout << "  Goal Extrapolation (Blue): hit = " << h_res.pred_blue_ok << ", team = " << h_res.pred_blue_team << "\n";
+    assert(h_res.pred_blue_ok);
+    assert(h_res.pred_blue_team == 0);
+
+    assert(!h_res.pred_slow_ok);
+    assert(!h_res.pred_wide_ok);
+
+    // 10. Verify Goal Scored Threshold
+    assert(!h_res.score_inside_ok);
+    assert(h_res.score_past_ok);
 
     std::cout << "[+] All Analytical SDF & Raycast tests passed successfully!\n";
     return 0;

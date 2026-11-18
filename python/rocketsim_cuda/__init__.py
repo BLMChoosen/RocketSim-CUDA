@@ -49,7 +49,7 @@ if _pyd:
             if not k.startswith("__"):
                 globals()[k] = v
 
-from gym_env import RocketSimBatchedEnv
+from gym_env import RocketSimBatchedEnv, RocketSimEnv, GameEventTracker, BallPredTracker
 
 __all__ = [
     "SimContext",
@@ -57,6 +57,11 @@ __all__ = [
     "GpuEvent",
     "Event",
     "RocketSimBatchedEnv",
+    "RocketSimEnv",
+    "GameEventTracker",
+    "GameEventTrackerConfig",
+    "BallPredTracker",
+    "is_ball_probably_going_in",
     "zeros",
     "get_vram_info",
     "TICK_RATE",

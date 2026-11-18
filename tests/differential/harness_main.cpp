@@ -19,6 +19,7 @@
 
 #include "rocketsim_cuda/config.h"
 #include "rocketsim_cuda/sim_context.cuh"
+#include "rocketsim_cuda/physics/arena_sdf.cuh"
 #include "cpu_ref_sim.h"
 #include "golden_master.h"
 #include "scenarios/scenario_registry.h"
@@ -1353,6 +1354,52 @@ int main(int argc, char** argv) {
         std::cout << "    Correctly rejected perturbed Car: Delta " << fail.max_delta
                   << " > Threshold " << fail.threshold << "\n";
         std::cout << "[+] Comparator Sensitivity verified: Strictly enforces GEMINI.md tolerances.\n\n";
+
+        // Goal Extrapolation Parity check: CPURefSim vs GPU is_ball_probably_going_in
+        std::cout << "[Test 4b] Verifying Goal Extrapolation Parity (CPURefSim vs GPU SDF)...\n";
+        CPURefSim cpu_ref(1, true);
+        BallStatePOD b_test;
+        b_test.quat = Quat::identity();
+
+        struct GoalTestCase {
+            Vec3 pos;
+            Vec3 vel;
+            float max_time;
+            float margin;
+        };
+
+        GoalTestCase goal_cases[] = {
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 3000.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, -3000.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 500.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(2000.0f, 3000.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 3000.0f, 2000.0f), 2.0f, 0.0f },
+            // Supersonic velocities (>= 4000 UU/s) and extra margins
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 5000.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, -5500.0f, 0.0f), 2.0f, 50.0f },
+            { Vec3(800.0f, 0.0f, 200.0f), Vec3(50.0f, 4200.0f, 0.0f), 2.0f, 100.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(1500.0f, 0.0f, 0.0f), 2.0f, 0.0f },
+            { Vec3(0.0f, 0.0f, 100.0f), Vec3(0.0f, 3000.0f, 0.0f), -1.0f, 0.0f }
+        };
+
+        for (const auto& tc : goal_cases) {
+            b_test.pos = tc.pos;
+            b_test.vel = tc.vel;
+            cpu_ref.SetBallState(b_test);
+
+            int cpu_team = -1;
+            bool cpu_res = cpu_ref.IsBallProbablyGoingIn(tc.max_time, tc.margin, &cpu_team);
+
+            int32_t gpu_team = -1;
+            bool gpu_res = is_ball_probably_going_in(tc.pos, tc.vel, tc.max_time, tc.margin, &gpu_team);
+
+            if (cpu_res != gpu_res || (cpu_res && cpu_team != gpu_team)) {
+                std::cerr << "[-] Error: Goal extrapolation divergence! CPU: (" << cpu_res << ", " << cpu_team
+                          << ") vs GPU: (" << gpu_res << ", " << gpu_team << ")\n";
+                return 1;
+            }
+        }
+        std::cout << "[+] Goal Extrapolation Parity verified: 100% agreement CPU vs GPU.\n\n";
     }
 
     // ------------------------------------------------------------------

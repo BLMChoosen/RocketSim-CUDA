@@ -596,7 +596,9 @@ class GameEventTracker:
 
 
 # Expose in rocketsim_cuda module per orchestrator requirement
+RocketSimEnv = RocketSimBatchedEnv
 rocketsim_cuda.RocketSimBatchedEnv = RocketSimBatchedEnv
+rocketsim_cuda.RocketSimEnv = RocketSimEnv
 rocketsim_cuda.BallPredTracker = BallPredTracker
 rocketsim_cuda.GameEventTracker = GameEventTracker
 rocketsim_cuda.gym_env = sys.modules[__name__]

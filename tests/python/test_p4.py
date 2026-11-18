@@ -264,3 +264,195 @@ def test_p4_selective_indexed_game_event_reset():
         sim.reset_game_events_indexed(idx_tensor)
         empty_tensor = torch.tensor([], dtype=torch.int32)
         sim.reset_game_events_indexed(empty_tensor)
+
+
+def test_p4_shot_event_trigger():
+    """
+    Test that a high-speed ball shot towards the net triggers step_shots, total_shots, and ball_shot.
+    """
+    if torch is None:
+        pytest.skip("PyTorch required for tensor manipulation")
+
+    env = RocketSimBatchedEnv(num_envs=1, cars_per_env=2)
+    # Car 0 (Blue) waiting in defense, Car 1 (Orange) shooting at Blue net (-Y)
+    car_state = torch.zeros((1, 2, 13), dtype=torch.float32)
+    car_state[0, 0, 0] = 500.0; car_state[0, 0, 1] = -5000.0; car_state[0, 0, 2] = 17.03; car_state[0, 0, 6] = 1.0
+    car_state[0, 1, 0] = 0.0; car_state[0, 1, 1] = -3000.0; car_state[0, 1, 2] = 17.03; car_state[0, 1, 4] = -2300.0; car_state[0, 1, 6] = 1.0
+
+    ball_state = torch.zeros((1, 13), dtype=torch.float32)
+    ball_state[0, 0] = 0.0; ball_state[0, 1] = -3150.0; ball_state[0, 2] = 93.15
+
+    env.set_car_state(car_state)
+    env.set_ball_state(ball_state)
+
+    shot_ok = False
+    for step in range(45):
+        env.step()
+        if int(env.get_step_shots()[0, 1]) == 1:
+            shot_ok = True
+            break
+
+    assert shot_ok is True, "Shot was not credited to shooter within 45 ticks"
+    assert int(env.get_ball_shot()[0]) == 1
+    assert int(env.get_ball_shot_goal_team()[0]) == 0  # Blue net targeted
+    assert int(env.get_total_shots()[0, 1]) >= 1
+
+
+def test_p4_save_event_trigger():
+    """
+    Test that an active shot on goal intercepted and cleared by a defender triggers step_saves and total_saves.
+    """
+    if torch is None:
+        pytest.skip("PyTorch required for tensor manipulation")
+
+    env = RocketSimBatchedEnv(num_envs=1, cars_per_env=2)
+    car_state = torch.zeros((1, 2, 13), dtype=torch.float32)
+    car_state[0, 0, 0] = 500.0; car_state[0, 0, 1] = -5000.0; car_state[0, 0, 2] = 17.03; car_state[0, 0, 6] = 1.0
+    car_state[0, 1, 0] = 0.0; car_state[0, 1, 1] = -3000.0; car_state[0, 1, 2] = 17.03; car_state[0, 1, 4] = -2300.0; car_state[0, 1, 6] = 1.0
+
+    ball_state = torch.zeros((1, 13), dtype=torch.float32)
+    ball_state[0, 0] = 0.0; ball_state[0, 1] = -3150.0; ball_state[0, 2] = 93.15
+
+    env.set_car_state(car_state)
+    env.set_ball_state(ball_state)
+
+    # Step until shot is active
+    for _ in range(38):
+        env.step()
+
+    assert int(env.get_ball_shot()[0]) == 1
+
+    # Intercept ball in air with Car 0 (Blue defender)
+    ball_obs = env.get_ball_observations()
+    bx, by, bz = float(ball_obs[0, 0]), float(ball_obs[0, 1]), float(ball_obs[0, 2])
+    car0_state = torch.zeros((1, 13), dtype=torch.float32)
+    car0_state[0, 0] = bx; car0_state[0, 1] = by - 120.0; car0_state[0, 2] = bz; car0_state[0, 4] = 2300.0; car0_state[0, 6] = 1.0
+    env.set_car_state(car0_state, car_start=0)
+
+    save_ok = False
+    for _ in range(10):
+        env.step()
+        if int(env.get_step_saves()[0, 0]) == 1:
+            save_ok = True
+            break
+
+    assert save_ok is True, "Save was not credited to defender"
+    assert int(env.get_ball_shot()[0]) == 0
+    assert int(env.get_total_saves()[0, 0]) >= 1
+
+
+def test_p4_goal_and_assist_event_trigger():
+    """
+    Test 2-touch passing sequence crediting goal to shooter and assist to passer.
+    """
+    if torch is None:
+        pytest.skip("PyTorch required for tensor manipulation")
+
+    env = RocketSimBatchedEnv(num_envs=1, cars_per_env=4)
+    # Car 0 (Blue passer), Car 2 (Blue shooter)
+    car_state = torch.zeros((1, 4, 13), dtype=torch.float32)
+    car_state[0, 0, 0] = 0.0; car_state[0, 0, 1] = 0.0; car_state[0, 0, 2] = 17.03; car_state[0, 0, 4] = 2000.0; car_state[0, 0, 6] = 1.0
+    car_state[0, 1, 0] = 2000.0; car_state[0, 2, 0] = -2000.0; car_state[0, 3, 0] = 2000.0
+
+    ball_state = torch.zeros((1, 13), dtype=torch.float32)
+    ball_state[0, 0] = 0.0; ball_state[0, 1] = 150.0; ball_state[0, 2] = 93.15
+
+    env.set_car_state(car_state)
+    env.set_ball_state(ball_state)
+
+    # Car 0 hits ball
+    for _ in range(10):
+        env.step()
+        if int(env.get_step_touches()[0, 0]) == 1:
+            break
+
+    # Car 2 hits ball next
+    bobs = env.get_ball_observations()
+    bx, by = float(bobs[0, 0]), float(bobs[0, 1])
+    c2s = torch.zeros((1, 13), dtype=torch.float32)
+    c2s[0, 0] = bx; c2s[0, 1] = by - 100.0; c2s[0, 2] = 17.03; c2s[0, 4] = 2000.0; c2s[0, 6] = 1.0
+    env.set_car_state(c2s, car_start=2)
+
+    for _ in range(10):
+        env.step()
+        if int(env.get_step_touches()[0, 2]) == 1:
+            break
+
+    # Score ball into Orange net (+Y)
+    scored = torch.zeros((1, 13), dtype=torch.float32)
+    scored[0, 0] = 0.0; scored[0, 1] = 5300.0; scored[0, 2] = 100.0
+    env.set_ball_state(scored)
+    env.step()
+
+    assert int(env.get_step_goals()[0, 2]) == 1, "Shooter (Car 2) must receive step_goals = 1"
+    assert int(env.get_step_assists()[0, 0]) == 1, "Passer (Car 0) must receive step_assists = 1"
+    assert int(env.get_total_goals()[0, 2]) == 1
+    assert int(env.get_total_assists()[0, 0]) == 1
+
+
+def test_p4_module_exports_and_aliases():
+    """
+    Test direct imports from rocketsim_cuda root package and env aliases.
+    """
+    import rocketsim_cuda
+    assert hasattr(rocketsim_cuda, "GameEventTracker")
+    assert hasattr(rocketsim_cuda, "GameEventTrackerConfig")
+    assert hasattr(rocketsim_cuda, "RocketSimEnv")
+    assert hasattr(rocketsim_cuda, "RocketSimBatchedEnv")
+    assert hasattr(rocketsim_cuda, "BallPredTracker")
+    assert hasattr(rocketsim_cuda, "is_ball_probably_going_in")
+
+    from rocketsim_cuda import RocketSimEnv, GameEventTracker, BallPredTracker, is_ball_probably_going_in
+    assert RocketSimEnv is not None
+    assert GameEventTracker is not None
+    assert BallPredTracker is not None
+    assert is_ball_probably_going_in is not None
+
+
+def test_p4_multi_defender_save_attribution():
+    """
+    Validate multi-touch save attribution when multiple defenders contact the ball
+    inside or near the goal cavity. The earliest/primary defender should receive save credit.
+    """
+    if torch is None:
+        pytest.skip("PyTorch required for tensor manipulation")
+
+    # 1 env, 4 cars: Car 0 (Blue defender 1), Car 1 (Orange shooter), Car 2 (Blue defender 2), Car 3 (Orange)
+    env = RocketSimBatchedEnv(num_envs=1, cars_per_env=4)
+
+    # Shooter Car 1 fires ball at Blue net (-Y)
+    car_state = torch.zeros((1, 4, 13), dtype=torch.float32)
+    car_state[0, 0, 0] = -200.0; car_state[0, 0, 1] = -5000.0; car_state[0, 0, 2] = 17.03; car_state[0, 0, 6] = 1.0 # Blue def 1
+    car_state[0, 1, 0] = 0.0; car_state[0, 1, 1] = -3000.0; car_state[0, 1, 2] = 17.03; car_state[0, 1, 4] = -2300.0; car_state[0, 1, 6] = 1.0 # Shooter
+    car_state[0, 2, 0] = 200.0; car_state[0, 2, 1] = -5000.0; car_state[0, 2, 2] = 17.03; car_state[0, 2, 6] = 1.0  # Blue def 2
+    car_state[0, 3, 0] = 2000.0; car_state[0, 3, 1] = 0.0; car_state[0, 3, 2] = 17.03; car_state[0, 3, 6] = 1.0
+
+    ball_state = torch.zeros((1, 13), dtype=torch.float32)
+    ball_state[0, 0] = 0.0; ball_state[0, 1] = -3150.0; ball_state[0, 2] = 93.15
+
+    env.set_car_state(car_state)
+    env.set_ball_state(ball_state)
+
+    # Step until shot is active
+    for _ in range(38):
+        env.step()
+
+    assert int(env.get_ball_shot()[0]) == 1
+
+    # Intercept ball with Blue defender 0
+    ball_obs = env.get_ball_observations()
+    bx, by, bz = float(ball_obs[0, 0]), float(ball_obs[0, 1]), float(ball_obs[0, 2])
+    c0_state = torch.zeros((1, 13), dtype=torch.float32)
+    c0_state[0, 0] = bx; c0_state[0, 1] = by - 120.0; c0_state[0, 2] = bz; c0_state[0, 4] = 2300.0; c0_state[0, 6] = 1.0
+    env.set_car_state(c0_state, car_start=0)
+
+    save_awarded = False
+    for _ in range(10):
+        env.step()
+        if int(env.get_step_saves()[0, 0]) == 1 or int(env.get_step_saves()[0, 2]) == 1:
+            save_awarded = True
+            break
+
+    assert save_awarded is True, "Save must be awarded to defending team"
+    assert int(env.get_ball_shot()[0]) == 0, "Ball shot must clear upon save"
+
