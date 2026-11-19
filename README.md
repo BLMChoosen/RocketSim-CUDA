@@ -12,7 +12,7 @@
 
 <br>
 
-<img src="https://user-images.githubusercontent.com/36944229/219303954-7267bce1-b7c5-4f15-881c-b9545512e65b.png" alt="RocketSim-CUDA Banner" width="800"/>
+<img src="assets/banner.png" alt="RocketSim-CUDA Banner" width="800"/>
 
 <p align="center">
   A ground-up C++/CUDA reimplementation of <a href="https://github.com/ZealanL/RocketSim">ZealanL's RocketSim</a> designed to simulate tens of thousands of Rocket League matches concurrently on GPU with <b>zero-copy PyTorch/DLPack tensor integration</b>.
