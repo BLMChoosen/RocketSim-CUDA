@@ -1,0 +1,773 @@
+{
+  "categories": [
+    {
+      "title": "1. Din\u00e2mica B\u00e1sica, Repouso e Queda Livre",
+      "items": [
+        {
+          "scenario": "idle",
+          "sim_t1": 99.999996508,
+          "sim_t10": 99.9999779,
+          "sim_t60": 99.96804999999999,
+          "avg_t60": 99.99785539110526,
+          "car_pos_err": 0.004883,
+          "car_vel_err": 0.02493,
+          "car_quat_err": 2.248e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "freefall",
+          "sim_t1": 99.999992569,
+          "sim_t10": 99.99995927,
+          "sim_t60": 99.9998107,
+          "avg_t60": 99.9999780041579,
+          "car_pos_err": 0.002441,
+          "car_vel_err": 9.155e-05,
+          "car_quat_err": 0.0,
+          "ball_pos_err": 0.002686,
+          "ball_vel_err": 0.0001831,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "2. Condu\u00e7\u00e3o em Solo, Tra\u00e7\u00e3o, Boost e Freio de M\u00e3o",
+      "items": [
+        {
+          "scenario": "throttle",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.95218,
+          "avg_t60": 99.99570508,
+          "car_pos_err": 0.007812,
+          "car_vel_err": 0.02493,
+          "car_quat_err": 2.134e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "boost",
+          "sim_t1": 99.99990314,
+          "sim_t10": 99.99909099999999,
+          "sim_t60": 99.92130999999999,
+          "avg_t60": 99.99408831257895,
+          "car_pos_err": 0.005371,
+          "car_vel_err": 0.0249,
+          "car_quat_err": 2.129e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_1_discrete_throttle_steer",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.9999779,
+          "sim_t60": 97.88900000000001,
+          "avg_t60": 99.81402977894736,
+          "car_pos_err": 0.1074,
+          "car_vel_err": 1.309,
+          "car_quat_err": 0.0007795,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_2_analog_throttle_steer",
+          "sim_t1": 99.999996508,
+          "sim_t10": 99.99996822,
+          "sim_t60": 95.465,
+          "avg_t60": 99.58905101368421,
+          "car_pos_err": 0.05908,
+          "car_vel_err": 0.5321,
+          "car_quat_err": 0.0003902,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_3_plus_boost",
+          "sim_t1": 99.99991113,
+          "sim_t10": 99.9991486,
+          "sim_t60": 81.02000000000001,
+          "avg_t60": 98.94944825263158,
+          "car_pos_err": 0.2842,
+          "car_vel_err": 2.44,
+          "car_quat_err": 0.001207,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_4_plus_handbrake",
+          "sim_t1": 99.999994759,
+          "sim_t10": 99.9991218,
+          "sim_t60": 89.78,
+          "avg_t60": 99.41552988421053,
+          "car_pos_err": 0.375,
+          "car_vel_err": 4.401,
+          "car_quat_err": 0.00219,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "3. Mec\u00e2nica de Saltos, Duplo Salto & Flips/Dodges",
+      "items": [
+        {
+          "scenario": "jump_flip",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.99894,
+          "avg_t60": 99.99990868131579,
+          "car_pos_err": 0.006348,
+          "car_vel_err": 0.0003548,
+          "car_quat_err": 2.384e-07,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_5_plus_single_jump",
+          "sim_t1": 99.999994759,
+          "sim_t10": 99.9991218,
+          "sim_t60": 99.994891,
+          "avg_t60": 99.99964922768422,
+          "car_pos_err": 0.008789,
+          "car_vel_err": 0.000351,
+          "car_quat_err": 5.96e-08,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_6_plus_double_jump",
+          "sim_t1": 99.999994759,
+          "sim_t10": 99.9991218,
+          "sim_t60": 99.994891,
+          "avg_t60": 99.99964922768422,
+          "car_pos_err": 0.008789,
+          "car_vel_err": 0.000351,
+          "car_quat_err": 5.96e-08,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_7_plus_dodge_flip",
+          "sim_t1": 99.999994759,
+          "sim_t10": 99.9991218,
+          "sim_t60": 99.998737,
+          "avg_t60": 99.99984818401579,
+          "car_pos_err": 0.008789,
+          "car_vel_err": 0.0003967,
+          "car_quat_err": 5.364e-07,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_5_flips",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.99897800000001,
+          "avg_t60": 99.99990579203684,
+          "car_pos_err": 0.006836,
+          "car_vel_err": 0.0003638,
+          "car_quat_err": 2.384e-07,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "4. Controle A\u00e9reo, Downforce & Pousos",
+      "items": [
+        {
+          "scenario": "ablation_8_plus_air_control",
+          "sim_t1": 99.999994759,
+          "sim_t10": 99.9991218,
+          "sim_t60": 99.99754899999999,
+          "avg_t60": 99.99978609663158,
+          "car_pos_err": 0.009766,
+          "car_vel_err": 0.0003757,
+          "car_quat_err": 5.364e-07,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_9_plus_landings",
+          "sim_t1": 99.999990309,
+          "sim_t10": 99.99994411,
+          "sim_t60": 96.193,
+          "avg_t60": 99.77533128093684,
+          "car_pos_err": 0.002075,
+          "car_vel_err": 0.1279,
+          "car_quat_err": 2.853e-05,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "5. Geometria da Arena, Rampas Curvas & Teto",
+      "items": [
+        {
+          "scenario": "car_side_wall",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96596,
+          "sim_t60": 99.993667,
+          "avg_t60": 99.99966129447368,
+          "car_pos_err": 0.0004883,
+          "car_vel_err": 0.001282,
+          "car_quat_err": 2.477e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_corner_ramp",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96621,
+          "sim_t60": 99.992509,
+          "avg_t60": 99.999585187,
+          "car_pos_err": 0.004883,
+          "car_vel_err": 0.0009452,
+          "car_quat_err": 2.282e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_ceiling",
+          "sim_t1": 99.999996508,
+          "sim_t10": 99.99996142,
+          "sim_t60": 99.9998104,
+          "avg_t60": 99.99998630452632,
+          "car_pos_err": 0.001221,
+          "car_vel_err": 0.001282,
+          "car_quat_err": 5.96e-08,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_jump_wall_land",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96238,
+          "sim_t60": 99.98975,
+          "avg_t60": 99.99929463363158,
+          "car_pos_err": 0.003662,
+          "car_vel_err": 0.005974,
+          "car_quat_err": 1.45e-05,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_floor_wall_transition",
+          "sim_t1": 99.9989,
+          "sim_t10": 99.96644,
+          "sim_t60": 99.992625,
+          "avg_t60": 99.99960656703422,
+          "car_pos_err": 0.0004883,
+          "car_vel_err": 0.001282,
+          "car_quat_err": 2.473e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "6. F\u00edsica da Bola & Quiques em Superf\u00edcies",
+      "items": [
+        {
+          "scenario": "ball_flight",
+          "sim_t1": 99.999992934,
+          "sim_t10": 99.9999779,
+          "sim_t60": 99.96804999999999,
+          "avg_t60": 99.99783163689474,
+          "car_pos_err": 0.004883,
+          "car_vel_err": 0.02493,
+          "car_quat_err": 2.248e-06,
+          "ball_pos_err": 0.0006714,
+          "ball_vel_err": 0.002075,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_floor_drop",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 99.997085,
+          "avg_t60": 99.99982293742264,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 0.0001831,
+          "ball_vel_err": 0.0001831,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_floor_angled",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 95.20100000000001,
+          "avg_t60": 99.66623907742263,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 7.23,
+          "ball_vel_err": 867.6,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_side_wall",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 99.97397,
+          "avg_t60": 99.99844402531737,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 1.006,
+          "ball_vel_err": 0.001221,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_back_wall",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 99.97649,
+          "avg_t60": 99.99857030900158,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 1.153,
+          "ball_vel_err": 0.001343,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_ceiling",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 99.5273,
+          "avg_t60": 99.97405270900158,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 0.8297,
+          "ball_vel_err": 3.249,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_corner_ramp",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 93.286,
+          "avg_t60": 98.73024150373843,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 4.797,
+          "ball_vel_err": 13.91,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_goal_post",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 0.0,
+          "avg_t60": 89.98821276163316,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 17.87,
+          "ball_vel_err": 126.6,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ball_crossbar",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.92339,
+          "sim_t60": 99.97649,
+          "avg_t60": 99.99856430847527,
+          "car_pos_err": 8.498e-05,
+          "car_vel_err": 0.002919,
+          "car_quat_err": 2.468e-06,
+          "ball_pos_err": 1.153,
+          "ball_vel_err": 0.001343,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "7. Colis\u00e3o Carro-Bola (Toques, Chutes & Defesas)",
+      "items": [
+        {
+          "scenario": "car_ball_hit",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96654000000001,
+          "sim_t60": 99.98795,
+          "avg_t60": 99.9985806856842,
+          "car_pos_err": 0.0004272,
+          "car_vel_err": 0.001282,
+          "car_quat_err": 1.733e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "kickoff_goalie",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96701999999999,
+          "sim_t60": 99.98809,
+          "avg_t60": 99.9985353198421,
+          "car_pos_err": 0.007324,
+          "car_vel_err": 0.001282,
+          "car_quat_err": 1.727e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "wheels_on_ball",
+          "sim_t1": 100.0,
+          "sim_t10": 99.99997098,
+          "sim_t60": 0.0,
+          "avg_t60": 67.91792798575317,
+          "car_pos_err": 6.771,
+          "car_vel_err": 43.77,
+          "car_quat_err": 0.009824,
+          "ball_pos_err": 10.19,
+          "ball_vel_err": 226.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "8. Boost Pads (Coleta & Cooldowns)",
+      "items": [
+        {
+          "scenario": "boost_pad_pickup",
+          "sim_t1": 99.9996374,
+          "sim_t10": 99.96014,
+          "sim_t60": 99.99705399999999,
+          "avg_t60": 99.999825529,
+          "car_pos_err": 0.00116,
+          "car_vel_err": 0.00119,
+          "car_quat_err": 2.463e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "9. Presets Oficiais de Hitbox (6 Hitboxes)",
+      "items": [
+        {
+          "scenario": "hitbox_dominus",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.8393,
+          "avg_t60": 99.99106022042106,
+          "car_pos_err": 0.008301,
+          "car_vel_err": 0.1217,
+          "car_quat_err": 1.928e-05,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "hitbox_plank",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.8459,
+          "avg_t60": 99.98987364631579,
+          "car_pos_err": 0.005859,
+          "car_vel_err": 0.1464,
+          "car_quat_err": 1.245e-05,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "hitbox_breakout",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.8353,
+          "avg_t60": 99.99086450473685,
+          "car_pos_err": 0.008789,
+          "car_vel_err": 0.1348,
+          "car_quat_err": 2.214e-05,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "hitbox_hybrid",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.91584999999999,
+          "avg_t60": 99.99291577463157,
+          "car_pos_err": 0.008301,
+          "car_vel_err": 0.0628,
+          "car_quat_err": 5.448e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "hitbox_merc",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.95675,
+          "avg_t60": 99.99744607652632,
+          "car_pos_err": 0.006348,
+          "car_vel_err": 0.0009766,
+          "car_quat_err": 2.98e-07,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "hitbox_psyclops",
+          "sim_t1": 99.99999426000001,
+          "sim_t10": 99.99994613999999,
+          "sim_t60": 99.97973,
+          "avg_t60": 99.99873253963158,
+          "car_pos_err": 0.008301,
+          "car_vel_err": 0.0002632,
+          "car_quat_err": 1.929e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "10. Colis\u00f5es Carro-Carro, Bumps & Demoli\u00e7\u00f5es",
+      "items": [
+        {
+          "scenario": "car_car_front",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.9617,
+          "sim_t60": 99.8807,
+          "avg_t60": 99.99237352205263,
+          "car_pos_err": 0.001648,
+          "car_vel_err": 0.001196,
+          "car_quat_err": 1.722e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_car_side",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.95484,
+          "sim_t60": 99.97088,
+          "avg_t60": 99.99807792138947,
+          "car_pos_err": 0.0001831,
+          "car_vel_err": 0.0009026,
+          "car_quat_err": 2.447e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_car_rear",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.96024,
+          "sim_t60": 0.0,
+          "avg_t60": 82.59563684210526,
+          "car_pos_err": 19.86,
+          "car_vel_err": 1687.0,
+          "car_quat_err": 0.1987,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_car_air",
+          "sim_t1": 100.0,
+          "sim_t10": 99.99995921,
+          "sim_t60": 99.9996223,
+          "avg_t60": 99.99996971257895,
+          "car_pos_err": 0.001038,
+          "car_vel_err": 9.155e-05,
+          "car_quat_err": 0.0,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_on_car",
+          "sim_t1": 99.998893,
+          "sim_t10": 99.92291,
+          "sim_t60": 0.0,
+          "avg_t60": 88.7034542424121,
+          "car_pos_err": 2.272,
+          "car_vel_err": 92.44,
+          "car_quat_err": 0.002921,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "wheels_on_car",
+          "sim_t1": 99.998893,
+          "sim_t10": 99.92291,
+          "sim_t60": 0.0,
+          "avg_t60": 88.85689125289126,
+          "car_pos_err": 1.798,
+          "car_vel_err": 45.76,
+          "car_quat_err": 0.001864,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_bump_supersonic",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.96148000000001,
+          "sim_t60": 0.0,
+          "avg_t60": 82.17614368421053,
+          "car_pos_err": 17.12,
+          "car_vel_err": 2273.0,
+          "car_quat_err": 0.3073,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_demo",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.96148000000001,
+          "sim_t60": 0.0,
+          "avg_t60": 79.32439121052631,
+          "car_pos_err": 26.54,
+          "car_vel_err": 1183.0,
+          "car_quat_err": 0.1735,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "car_demo_respawn",
+          "sim_t1": 99.998237,
+          "sim_t10": 0.0,
+          "sim_t60": 0.0,
+          "avg_t60": 81.60247473684211,
+          "car_pos_err": 39.55,
+          "car_vel_err": 1180.0,
+          "car_quat_err": 0.1289,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "11. Configura\u00e7\u00f5es de Mutator (F\u00edsica Customizada)",
+      "items": [
+        {
+          "scenario": "config_low_gravity",
+          "sim_t1": 99.999992196,
+          "sim_t10": 99.99995843,
+          "sim_t60": 99.9998351,
+          "avg_t60": 99.99998199157895,
+          "car_pos_err": 0.0007935,
+          "car_vel_err": 9.155e-05,
+          "car_quat_err": 0.0,
+          "ball_pos_err": 0.0008545,
+          "ball_vel_err": 7.629e-05,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "config_heavy_ball",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.95464,
+          "sim_t60": 95.211,
+          "avg_t60": 99.44406956052632,
+          "car_pos_err": 0.3895,
+          "car_vel_err": 131.8,
+          "car_quat_err": 0.001436,
+          "ball_pos_err": 5.375,
+          "ball_vel_err": 1430.0,
+          "status": "DRIFT"
+        }
+      ]
+    },
+    {
+      "title": "12. Partidas Multi-Carro, Kickoff Can\u00f4nico & Caos",
+      "items": [
+        {
+          "scenario": "kickoff_multicar",
+          "sim_t1": 99.998237,
+          "sim_t10": 99.94986,
+          "sim_t60": 99.98928000000001,
+          "avg_t60": 99.99904288894211,
+          "car_pos_err": 0.002441,
+          "car_vel_err": 0.001038,
+          "car_quat_err": 2.269e-06,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "multicar_2v2_goal_demo",
+          "sim_t1": 0.0,
+          "sim_t10": 85.61,
+          "sim_t60": 0.0,
+          "avg_t60": 73.36826947368421,
+          "car_pos_err": 26.54,
+          "car_vel_err": 1183.0,
+          "car_quat_err": 0.1904,
+          "ball_pos_err": 40.03,
+          "ball_vel_err": 177.5,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "ablation_10_random_full",
+          "sim_t1": 99.999996508,
+          "sim_t10": 99.998816,
+          "sim_t60": 60.440000000000005,
+          "avg_t60": 96.34930526315789,
+          "car_pos_err": 10.33,
+          "car_vel_err": 69.56,
+          "car_quat_err": 0.05285,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        },
+        {
+          "scenario": "random",
+          "sim_t1": 99.999996508,
+          "sim_t10": 99.998816,
+          "sim_t60": 60.440000000000005,
+          "avg_t60": 96.34930526315789,
+          "car_pos_err": 10.33,
+          "car_vel_err": 69.56,
+          "car_quat_err": 0.05285,
+          "ball_pos_err": 0.0,
+          "ball_vel_err": 0.0,
+          "status": "DRIFT"
+        }
+      ]
+    }
+  ],
+  "total_scenarios": 54,
+  "summary": {
+    "mean_sim_t1": 98.14772568172222,
+    "mean_sim_t10": 97.8572689111111,
+    "mean_sim_t60_worst": 80.80230230555556,
+    "mean_sim_t60_avg_components": 96.71324124651467
+  }
+}

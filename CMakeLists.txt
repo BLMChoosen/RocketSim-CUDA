@@ -169,6 +169,21 @@ target_include_directories(cpu_readme_benchmark PRIVATE
 )
 target_link_libraries(cpu_readme_benchmark PRIVATE rocketsim_cpu)
 
+add_executable(unified_soccar_benchmark
+    benchmarks/unified_soccar_benchmark.cu
+    tests/differential/cpu_ref_sim.cpp
+)
+target_include_directories(unified_soccar_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential
+    ${CMAKE_CURRENT_SOURCE_DIR}/libsrc/bullet3-3.24
+)
+target_link_libraries(unified_soccar_benchmark PRIVATE
+    rocketsim_cpu
+    rocketsim_cuda_core
+)
+
 # CTest Integration
 enable_testing()
 add_test(NAME TestMath COMMAND test_math)
